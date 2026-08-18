@@ -23,6 +23,10 @@ Two config keys, both overridable in a project's `.planning/config.json`:
 | `markdown-linting.enabled` | `true` | Master toggle. `false` skips the `verify:post` step entirely (no report is regenerated). |
 | `markdown-linting.ship_gate` | `true` | Whether the advisory `ship:pre` gate is even registered. `false` disables the gate but leaves `verify:post` running. |
 
+Targets are `.planning/`, root `README.md`, and root `CLAUDE.md`. The two root files are
+**linted if present** — a project without a root `CLAUDE.md` gets a normal count over what it does
+have, not an error.
+
 Ruleset (allowlist by omission — `config/.rumdl.toml` sets `[global] enable = [...]` with no
 `disable` key, so any rule not listed is off):
 
@@ -54,6 +58,11 @@ Ruleset (allowlist by omission — `config/.rumdl.toml` sets `[global] enable = 
   2. `uvx rumdl` (no persistent install).
   3. Neither available — one visible notice, exit 0, and `LINT-REPORT.md` rewritten with a
      `violation_count: unavailable` sentinel. Never a stale count presented as current.
+
+  A rumdl that *is* present but fails (bad ruleset, crash, non-JSON output) is a distinct, louder
+  path: the same `unavailable` sentinel is written, with an `unavailable_reason` naming the
+  failure, but a config/runtime error also exits `1`. A broken ruleset is never laundered into a
+  clean `0`.
 
   `rumdl` project: <https://github.com/rvben/rumdl>
 - Python 3 (standard library only)

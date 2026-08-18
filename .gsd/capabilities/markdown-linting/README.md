@@ -50,9 +50,25 @@ Three tiers, checked in order by `resolve_rumdl_invocation()`:
    `LINT-REPORT.md` rewritten with a `violation_count: unavailable` sentinel. Never a stale count
    presented as current (MDL-04).
 
+A rumdl that *is* reachable but fails takes a related path with a different exit code. Timeouts,
+`OSError`, an unexpected crash exit code, and non-JSON output all fail open (exit 0, `NOTICE`);
+a rumdl returncode of `2` (config/runtime error) is loud (exit 1). All of them write the same
+`violation_count: unavailable` sentinel plus an `unavailable_reason`, so no failure mode can leave
+a stale numeric count on disk for the `ship:pre` gate to read.
+
 `cargo install rumdl`, `pip install rumdl`, `brew install rumdl`, and `npm install -g rumdl` all
 exist as alternative install paths too — none of them is presented as the primary method; PATH
 plus the `uvx` fallback cover every environment this capability needs to run in.
+
+## Target set
+
+`.planning/`, root `README.md`, root `CLAUDE.md` (the D-02 set). The two root files are resolved
+**lint-if-present** by `resolve_targets()`: both are optional in a gsd-core project, and rumdl
+exits `2` ("Failed to find markdown files") on a path that does not exist, so passing an absent
+`CLAUDE.md` through would turn every run in such a project into a permanent `unavailable`
+sentinel the `ship:pre` gate could never satisfy. Paths named explicitly on the CLI
+(`lint.py count <paths>`, `lint.py fix <paths>`) are **not** filtered — a typo there fails loudly
+rather than silently linting nothing and reporting `0`.
 
 ## Ruleset
 
