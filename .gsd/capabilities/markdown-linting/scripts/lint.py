@@ -24,6 +24,10 @@ LINT_TARGETS = (".planning", "README.md", "CLAUDE.md")
 
 CONFIG_REL_PARTS = (".gsd", "capabilities", "markdown-linting", "config", ".rumdl.toml")
 
+# Wall-clock ceiling for any single rumdl invocation. Shared by the count
+# and --fix paths so the two can never drift apart.
+RUMDL_TIMEOUT_SECONDS = 60
+
 # MDL-04/B6, mirrors sync.py's NOTICE constant shape -- one line naming the
 # tool and both fallback tiers checked.
 NOTICE = "rumdl unavailable (checked PATH and uvx) -- lint skipped, LINT-REPORT.md marked unavailable"
@@ -57,12 +61,34 @@ def confined(root, *parts):
     return candidate
 
 
+def resolve_targets(root, paths=None):
+    """Confine the target set to `root` and return what rumdl can be handed.
+
+    The D-02 defaults are **lint-if-present**: `README.md` and `CLAUDE.md`
+    are both optional in a gsd-core project, and rumdl exits 2 ("Failed to
+    find markdown files") when a named path does not exist. Without this
+    filter, every verify:post run in a project with no root CLAUDE.md
+    would take the loud RuntimeError path and write a permanent
+    `violation_count: unavailable` the ship:pre gate can never satisfy --
+    a tree that lints clean would be indistinguishable from a broken
+    ruleset.
+
+    Explicitly named CLI paths are deliberately NOT filtered: a typo in
+    `lint.py count docs/REDME.md` must fail loudly rather than silently
+    lint nothing and print a reassuring 0.
+    """
+    if paths:
+        return [confined(root, p) for p in paths]
+    return [t for t in (confined(root, d) for d in LINT_TARGETS) if t.exists()]
+
+
 def resolve_rumdl_invocation():
     """D-04's two-tier chain: PATH first, then uvx, else None. Tool-absent
     fail-open handling (never raising here) is plan 02 scope -- a None
-    return is guarded explicitly by all three callers (`fix()`, `main()`'s
-    `count` branch, and `verify_post()`'s own None check), each raising or
-    handling it on their own terms rather than this function raising."""
+    return is guarded explicitly by both callers, each on its own terms
+    rather than this function raising: `resolve_cwd_run_context()` (the
+    operator-invoked `count`/`fix` subcommands) raises RuntimeError, while
+    `verify_post()` degrades to the MDL-04 sentinel report."""
     if shutil.which("rumdl"):
         return ["rumdl"]
     if shutil.which("uvx"):
@@ -70,46 +96,86 @@ def resolve_rumdl_invocation():
     return None
 
 
-def count_violations(config_path, targets, rumdl_argv):
-    """Run `rumdl check --config <config_path> --output-format json
-    <targets>` and return the exact integer length of the emitted JSON
-    array -- no text-summary parsing, no rounding (MDL-02 precision). A
-    returncode outside the completed-run pair (0 clean, 1 violations
-    found) is treated as a crash: `2` (config/runtime error) raises
-    RuntimeError, and any other value raises subprocess.CalledProcessError
-    rather than being parsed as JSON."""
-    argv = rumdl_argv + [
-        "check",
-        "--config", str(config_path),
-        "--output-format", "json",
-    ] + [str(t) for t in targets]
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+def check_argv(rumdl_argv, config_path, targets, *flags):
+    """Build one `rumdl check [...flags] --config <path> <targets>` argv
+    list. Single source of truth for the invocation shape, so the count,
+    --fix, and report-provenance paths cannot drift apart (the
+    `generated_from` field used to rebuild this list by hand)."""
+    return rumdl_argv + ["check", *flags, "--config", str(config_path)] + [
+        str(t) for t in targets
+    ]
+
+
+def run_rumdl(argv):
+    """Run a rumdl argv list and enforce the completed-run returncode
+    contract shared by every call site: 0 (clean) and 1 (violations found)
+    are completed runs; `2` (config/runtime error) raises RuntimeError; any
+    other value raises subprocess.CalledProcessError. Returns the
+    CompletedProcess so callers can read stdout."""
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=RUMDL_TIMEOUT_SECONDS
+    )
     if result.returncode == 2:
         raise RuntimeError(f"rumdl config/runtime error: {result.stderr}")
     if result.returncode not in (0, 1):
         raise subprocess.CalledProcessError(
             result.returncode, argv, result.stdout, result.stderr
         )
-    return len(json.loads(result.stdout))
+    return result
+
+
+def count_violations(config_path, targets, rumdl_argv):
+    """Run `rumdl check --config <config_path> --output-format json
+    <targets>` and return the exact integer length of the emitted JSON
+    array -- no text-summary parsing, no rounding (MDL-02 precision).
+
+    Output that is not a JSON array (empty stdout from a rumdl build
+    without `--output-format json`, a JSON object, a panic message) raises
+    ValueError rather than yielding a bogus count: `len()` of a dict would
+    silently report its key count as a violation total. verify_post()
+    catches ValueError on its fail-open path, so a malformed payload
+    degrades to the `unavailable` sentinel instead of escaping the
+    onError:skip dispatch and leaving a stale report behind.
+    """
+    if not targets:
+        # rumdl with zero path arguments walks the whole cwd instead of
+        # doing nothing -- an empty target set must never reach it.
+        return 0
+    argv = check_argv(rumdl_argv, config_path, targets, "--output-format", "json")
+    violations = json.loads(run_rumdl(argv).stdout)
+    if not isinstance(violations, list):
+        raise ValueError(
+            f"rumdl JSON output is {type(violations).__name__}, expected a list"
+        )
+    return len(violations)
 
 
 def _write_report(out_path, phase_dir, generated_at, config_path, generated_from, violation_count, unavailable_reason=None):
     """Shared frontmatter+body writer for both the happy path and the
     sentinel path -- one place that fully overwrites the report, so the two
     paths cannot drift into different file shapes."""
+    # WR-03 (mirrors pr_status.py's fix): every free-text field is emitted
+    # via json.dumps, whose output is also a valid double-quoted YAML
+    # scalar. This escapes both an embedded `"` (which would terminate the
+    # scalar early) and an embedded newline (which would otherwise inject
+    # arbitrary extra frontmatter keys). `unavailable_reason` is the one
+    # that makes this load-bearing rather than defensive: it carries rumdl's
+    # own stderr, so a linter error message containing a line reading
+    # `violation_count: 0` would append a second, later-wins
+    # `violation_count` key and hand the advisory ship:pre gate a clean
+    # verdict for a run that never measured anything. `phase` and `config`
+    # are filesystem-derived and quoted for the same reason (`:` in a
+    # directory name is legal and would otherwise re-key the line).
+    # `violation_count` stays unquoted: it is an int or the bare
+    # `unavailable` sentinel, and the gate compares it numerically.
     lines = [
         "---",
-        f"phase: {phase_dir.name}",
+        f"phase: {json.dumps(phase_dir.name)}",
         f"violation_count: {violation_count}",
     ]
     if unavailable_reason is not None:
-        lines.append(f"unavailable_reason: {unavailable_reason}")
-    lines.append(f"config: {config_path}")
-    # WR-03 (mirrors pr_status.py's fix): escape via json.dumps so a target
-    # path or invocation string containing a `"` cannot terminate this
-    # double-quoted YAML scalar early -- not reachable via LINT_TARGETS
-    # today, but count()/fix() already accept arbitrary CLI paths and this
-    # field must stay safe if verify_post ever grows the same override.
+        lines.append(f"unavailable_reason: {json.dumps(unavailable_reason)}")
+    lines.append(f"config: {json.dumps(str(config_path))}")
     lines.append(f"generated_from: {json.dumps(generated_from)}")
     lines.append(f"generated_at: {generated_at}")
     lines.append("---\n")
@@ -129,8 +195,10 @@ def verify_post(phase_dir_arg):
     hand edit.
 
     MDL-04 fail-open path (rumdl+uvx absent, a live rumdl call raising
-    TimeoutExpired/OSError, or rumdl exiting with an unexpected crash code
-    reported as CalledProcessError): print NOTICE exactly once and still
+    TimeoutExpired/OSError, rumdl exiting with an unexpected crash code
+    reported as CalledProcessError, or rumdl emitting output that is not a
+    JSON array -- ValueError, which json.JSONDecodeError subclasses):
+    print NOTICE exactly once and still
     fully overwrite the report, with a non-numeric
     `violation_count: unavailable` sentinel that cannot satisfy the
     ship:pre gate's `equals: 0` predicate.
@@ -167,7 +235,7 @@ def verify_post(phase_dir_arg):
     padded_phase = phase_dir.name.split("-", 1)[0]
 
     config_path = confined(project_root, *CONFIG_REL_PARTS)
-    targets = [confined(project_root, t) for t in LINT_TARGETS]
+    targets = resolve_targets(project_root)
     rumdl_argv = resolve_rumdl_invocation()
     out_path = confined(project_root, phase_dir.relative_to(project_root), f"{padded_phase}-LINT-REPORT.md")
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -182,16 +250,12 @@ def verify_post(phase_dir_arg):
         )
         return 0
 
-    argv = rumdl_argv + [
-        "check",
-        "--config", str(config_path),
-        "--output-format", "json",
-    ] + [str(t) for t in targets]
+    argv = check_argv(rumdl_argv, config_path, targets, "--output-format", "json")
 
     try:
         violation_count = count_violations(config_path, targets, rumdl_argv)
     except RuntimeError as exc:
-        print(f"rumdl config/runtime error: {exc}")
+        print(exc)
         _write_report(
             out_path, phase_dir, generated_at, config_path,
             generated_from=" ".join(argv),
@@ -199,7 +263,7 @@ def verify_post(phase_dir_arg):
             unavailable_reason=f"RuntimeError: {exc}",
         )
         return 1
-    except (subprocess.TimeoutExpired, OSError, subprocess.CalledProcessError) as exc:
+    except (subprocess.TimeoutExpired, OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(NOTICE)
         _write_report(
             out_path, phase_dir, generated_at, config_path,
@@ -218,26 +282,41 @@ def verify_post(phase_dir_arg):
     return 0
 
 
+def resolve_cwd_run_context(paths=None):
+    """Resolve (config_path, targets, rumdl_argv) for the two cwd-rooted
+    CLI subcommands (`count`, `fix`). Both are operator-invoked and
+    fail LOUDLY when no rumdl is reachable -- unlike verify_post, whose
+    MDL-04 contract is to degrade to a sentinel report instead."""
+    project_root = find_project_root(Path.cwd())
+    config_path = confined(project_root, *CONFIG_REL_PARTS)
+    targets = resolve_targets(project_root, paths)
+    rumdl_argv = resolve_rumdl_invocation()
+    if rumdl_argv is None:
+        raise RuntimeError("neither rumdl nor uvx is available on PATH")
+    return config_path, targets, rumdl_argv
+
+
 def fix(paths=None):
     """Allowlist-safe wrapper for `rumdl check --fix` (Pitfall 6: --fix
     lives on the check subcommand, not as a bare top-level flag). This
     machine's shell allowlist rejects a bare top-level `rumdl` command
     word and interpreter inline-code/heredoc-stdin forms -- routing the
     fixer through this script file is the invocation form that survives
-    it. Sole caller is plan 03 Task 1."""
-    project_root = find_project_root(Path.cwd())
-    config_path = confined(project_root, *CONFIG_REL_PARTS)
-    targets = [confined(project_root, t) for t in (paths or LINT_TARGETS)]
-    rumdl_argv = resolve_rumdl_invocation()
-    if rumdl_argv is None:
-        raise RuntimeError("neither rumdl nor uvx is available on PATH")
+    it. Sole caller is plan 03 Task 1.
 
-    check_argv = rumdl_argv + [
-        "check", "--fix",
-        "--config", str(config_path),
-    ] + [str(t) for t in targets]
-    result = subprocess.run(check_argv, capture_output=True, text=True, timeout=60)
+    The --fix run goes through run_rumdl, so a config/runtime error or a
+    crash raises here instead of being swallowed: this rewrites the
+    operator's markdown in place, and a partially-applied fix reported as
+    success is the one outcome worth failing loudly for."""
+    config_path, targets, rumdl_argv = resolve_cwd_run_context(paths)
+    if not targets:
+        # Same hazard as count_violations': a bare `rumdl check --fix` with
+        # no path arguments would rewrite every markdown file under cwd.
+        print("no existing targets to fix")
+        return 0
+    result = run_rumdl(check_argv(rumdl_argv, config_path, targets, "--fix"))
     print(result.stdout, end="")
+    print(result.stderr, end="", file=sys.stderr)
     post_fix_count = count_violations(config_path, targets, rumdl_argv)
     print(f"post-fix violation count: {post_fix_count}")
     return 0
@@ -270,13 +349,7 @@ def main(argv=None):
     if args.command == "verify-post":
         return verify_post(args.phase_dir)
     if args.command == "count":
-        project_root = find_project_root(Path.cwd())
-        config_path = confined(project_root, *CONFIG_REL_PARTS)
-        targets = [confined(project_root, t) for t in (args.paths or LINT_TARGETS)]
-        rumdl_argv = resolve_rumdl_invocation()
-        if rumdl_argv is None:
-            raise RuntimeError("neither rumdl nor uvx is available on PATH")
-        print(count_violations(config_path, targets, rumdl_argv))
+        print(count_violations(*resolve_cwd_run_context(args.paths)))
         return 0
     if args.command == "fix":
         return fix(args.paths)

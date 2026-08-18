@@ -166,7 +166,7 @@ class TestFailOpen(unittest.TestCase):
             self.assertIn("rumdl config/runtime error", captured.getvalue())
             text = report_path.read_text(encoding="utf-8")
             self.assertIn("violation_count: unavailable", text)
-            self.assertIn("unavailable_reason: RuntimeError", text)
+            self.assertIn('unavailable_reason: "RuntimeError', text)
             self.assertNotIn("violation_count: 0\n", text)
 
     def test_unexpected_exit_code_fail_open_overwrites_stale_report(self):
@@ -199,6 +199,133 @@ class TestFailOpen(unittest.TestCase):
             self.assertIn("CalledProcessError", text)
 
 
+    def test_malformed_json_output_fail_open_overwrites_stale_report(self):
+        # rumdl completing with returncode 0 but emitting something that is
+        # not a JSON array (an older build without --output-format json, a
+        # panic on stdout) used to raise json.JSONDecodeError straight out
+        # of verify_post. Under onError:skip that skips regeneration
+        # entirely and leaves the previous run's `violation_count: 0`
+        # sitting there satisfying ship:pre on unmeasured data -- the exact
+        # staleness this function exists to prevent.
+        for payload in ("", "not json at all", '{"violations": 3}'):
+            with self.subTest(payload=payload):
+                with tempfile.TemporaryDirectory() as tmp:
+                    phase_dir = _write_phase_dir(Path(tmp))
+                    report_path = phase_dir / "13-LINT-REPORT.md"
+                    report_path.write_text(
+                        "---\nviolation_count: 0\n---\n\nstale\n", encoding="utf-8"
+                    )
+                    completed = subprocess.CompletedProcess(
+                        args=["rumdl"], returncode=0, stdout=payload, stderr=""
+                    )
+                    captured = io.StringIO()
+                    with mock.patch(
+                        "shutil.which",
+                        side_effect=lambda name: "/usr/bin/rumdl" if name == "rumdl" else None,
+                    ):
+                        with mock.patch("subprocess.run", return_value=completed):
+                            with mock.patch("sys.stdout", captured):
+                                exit_code = lint.verify_post(str(phase_dir))
+
+                    self.assertEqual(exit_code, 0)
+                    self.assertEqual(captured.getvalue().count(lint.NOTICE), 1)
+                    text = report_path.read_text(encoding="utf-8")
+                    self.assertIn("violation_count: unavailable", text)
+                    self.assertNotIn("violation_count: 0\n", text)
+
+
+class TestFrontmatterInjection(unittest.TestCase):
+    """rumdl's own stderr reaches the report as `unavailable_reason`. An
+    error message containing a line reading `violation_count: 0` must not
+    be able to append a second, later-wins frontmatter key and hand the
+    advisory ship:pre gate a clean verdict for a run that never measured
+    anything."""
+
+    def _frontmatter_lines(self, text):
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "---")
+        return lines[1:lines.index("---", 1)]
+
+    def test_stderr_newline_cannot_inject_frontmatter_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase_dir = _write_phase_dir(Path(tmp))
+            completed = subprocess.CompletedProcess(
+                args=["rumdl"], returncode=2, stdout="",
+                stderr="bad config\nviolation_count: 0\nunavailable_reason: none",
+            )
+            with mock.patch(
+                "shutil.which",
+                side_effect=lambda name: "/usr/bin/rumdl" if name == "rumdl" else None,
+            ):
+                with mock.patch("subprocess.run", return_value=completed):
+                    with mock.patch("sys.stdout", io.StringIO()):
+                        exit_code = lint.verify_post(str(phase_dir))
+
+            self.assertEqual(exit_code, 1)
+            text = (phase_dir / "13-LINT-REPORT.md").read_text(encoding="utf-8")
+            keys = [line.split(":", 1)[0] for line in self._frontmatter_lines(text)]
+            self.assertEqual(len(keys), len(set(keys)), text)
+            self.assertEqual(keys.count("violation_count"), 1, text)
+            self.assertIn("violation_count: unavailable", text)
+
+    def test_phase_and_config_are_quoted_scalars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase_dir = _write_phase_dir(Path(tmp), phase_dir_name="13-a: b")
+            with mock.patch("shutil.which", return_value=None):
+                with mock.patch("sys.stdout", io.StringIO()):
+                    lint.verify_post(str(phase_dir))
+            text = (phase_dir / "13-LINT-REPORT.md").read_text(encoding="utf-8")
+            self.assertIn('phase: "13-a: b"', text)
+            self.assertRegex(text, r'\nconfig: ".*\.rumdl\.toml"\n')
+
+
+class TestFix(unittest.TestCase):
+    """`fix` rewrites the operator's markdown in place, so a rumdl
+    config/runtime error must raise rather than be reported as a
+    successful fix pass."""
+
+    def test_fix_raises_on_config_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _make_fake_project_root(tmp_path)
+            completed = subprocess.CompletedProcess(
+                args=["rumdl"], returncode=2, stdout="", stderr="bad config"
+            )
+            with mock.patch.object(lint.Path, "cwd", return_value=tmp_path):
+                with mock.patch(
+                    "shutil.which",
+                    side_effect=lambda name: "/usr/bin/rumdl" if name == "rumdl" else None,
+                ):
+                    with mock.patch("subprocess.run", return_value=completed):
+                        with self.assertRaises(RuntimeError):
+                            lint.fix()
+
+    def test_fix_counts_after_fixing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _make_fake_project_root(tmp_path)
+            (tmp_path / "README.md").write_text("# T\n", encoding="utf-8")
+            calls = []
+
+            def fake_run(argv, **kwargs):
+                calls.append(argv)
+                return subprocess.CompletedProcess(
+                    args=argv, returncode=0, stdout="[]", stderr=""
+                )
+
+            captured = io.StringIO()
+            with mock.patch.object(lint.Path, "cwd", return_value=tmp_path):
+                with mock.patch("shutil.which", return_value="/usr/bin/rumdl"):
+                    with mock.patch("subprocess.run", side_effect=fake_run):
+                        with mock.patch("sys.stdout", captured):
+                            self.assertEqual(lint.fix(["README.md"]), 0)
+
+            self.assertEqual(len(calls), 2)
+            self.assertIn("--fix", calls[0])
+            self.assertNotIn("--fix", calls[1])
+            self.assertIn("post-fix violation count: 0", captured.getvalue())
+
+
 class TestWriteReportEscaping(unittest.TestCase):
     """generated_from must be JSON-escaped (mirrors pr_status.py's WR-03
     fix) so an embedded `"` cannot terminate the double-quoted YAML scalar
@@ -224,9 +351,12 @@ class TestWriteReportEscaping(unittest.TestCase):
 
 
 class TestOutPathConfinement(unittest.TestCase):
-    """verify_post's out_path must go through confined() like pr_status.py's
-    sibling does -- a phase_dir outside project_root must raise rather than
-    silently write outside the resolved root."""
+    """verify_post's out_path goes through confined() like pr_status.py's
+    sibling does, so the report can only ever land inside the resolved
+    project root. (find_project_root walks UP from phase_dir, so a
+    phase_dir outside its own root is unreachable by construction --
+    confined() is the belt to that braces, and what this asserts is the
+    resulting invariant, not an escape attempt.)"""
 
     def test_out_path_confined_to_project_root(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -336,6 +466,42 @@ class TestToolResolution(unittest.TestCase):
             self.assertIn(
                 "neither rumdl nor uvx is available on PATH", str(ctx.exception)
             )
+
+
+class TestOptionalTargets(unittest.TestCase):
+    """README.md and CLAUDE.md are optional in a gsd-core project, but
+    rumdl exits 2 on a path that does not exist. Absent defaults must be
+    filtered out (yielding a real count) rather than turning every run
+    into a permanent `unavailable` sentinel the ship:pre gate can never
+    satisfy. Explicit CLI paths keep failing loudly."""
+
+    @unittest.skipUnless(_rumdl_available(), "neither rumdl nor uvx is available")
+    def test_missing_optional_default_targets_still_produce_a_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            phase_dir = _make_fake_project_root(tmp_path)
+            # Only README.md exists: CLAUDE.md is absent, as in most projects.
+            (tmp_path / "README.md").write_text(
+                (FIXTURES_DIR / "clean.md").read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            self.assertFalse((tmp_path / "CLAUDE.md").exists())
+
+            captured = io.StringIO()
+            with mock.patch("sys.stdout", captured):
+                exit_code = lint.verify_post(str(phase_dir))
+
+            self.assertEqual(exit_code, 0)
+            report_text = (phase_dir / "13-LINT-REPORT.md").read_text(encoding="utf-8")
+            self.assertIn("violation_count: 0\n", report_text)
+            self.assertNotIn("unavailable", report_text)
+            self.assertNotIn("CLAUDE.md", report_text)
+
+    def test_explicitly_named_missing_path_is_not_filtered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            _make_fake_project_root(tmp_path)
+            targets = lint.resolve_targets(tmp_path, ["definitely-absent.md"])
+            self.assertEqual([t.name for t in targets], ["definitely-absent.md"])
 
 
 class TestEmptyTargetSet(unittest.TestCase):
