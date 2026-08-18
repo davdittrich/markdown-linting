@@ -137,22 +137,37 @@ class TestFailOpen(unittest.TestCase):
             text = (phase_dir / "13-LINT-REPORT.md").read_text(encoding="utf-8")
             self.assertIn("violation_count: unavailable", text)
 
-    def test_config_error_raises(self):
+    def test_config_error_writes_sentinel_and_returns_nonzero(self):
+        # A config/runtime error (rumdl returncode 2) is loud -- exit 1, not
+        # 0 -- but must NOT leave the report un-regenerated: under this
+        # dispatch point's onError:skip contract, an uncaught exception here
+        # would skip regeneration entirely and leave a stale prior-run
+        # report (e.g. violation_count: 0) sitting there, silently
+        # satisfying ship:pre on unmeasured data. See verify_post docstring.
         with tempfile.TemporaryDirectory() as tmp:
             phase_dir = _write_phase_dir(Path(tmp))
+            report_path = phase_dir / "13-LINT-REPORT.md"
+            report_path.write_text(
+                "---\nviolation_count: 0\n---\n\nstale\n", encoding="utf-8"
+            )
             completed = subprocess.CompletedProcess(
                 args=["rumdl"], returncode=2, stdout="", stderr="bad config"
             )
+            captured = io.StringIO()
             with mock.patch(
                 "shutil.which",
                 side_effect=lambda name: "/usr/bin/rumdl" if name == "rumdl" else None,
             ):
                 with mock.patch("subprocess.run", return_value=completed):
-                    with self.assertRaises(RuntimeError):
-                        lint.verify_post(str(phase_dir))
+                    with mock.patch("sys.stdout", captured):
+                        exit_code = lint.verify_post(str(phase_dir))
 
-            report_path = phase_dir / "13-LINT-REPORT.md"
-            self.assertFalse(report_path.exists())
+            self.assertEqual(exit_code, 1)
+            self.assertIn("rumdl config/runtime error", captured.getvalue())
+            text = report_path.read_text(encoding="utf-8")
+            self.assertIn("violation_count: unavailable", text)
+            self.assertIn("unavailable_reason: RuntimeError", text)
+            self.assertNotIn("violation_count: 0\n", text)
 
     def test_unexpected_exit_code_fail_open_overwrites_stale_report(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -182,6 +197,45 @@ class TestFailOpen(unittest.TestCase):
             self.assertIn("violation_count: unavailable", text)
             self.assertNotIn("violation_count: 0\n", text)
             self.assertIn("CalledProcessError", text)
+
+
+class TestWriteReportEscaping(unittest.TestCase):
+    """generated_from must be JSON-escaped (mirrors pr_status.py's WR-03
+    fix) so an embedded `"` cannot terminate the double-quoted YAML scalar
+    early. Not reachable via LINT_TARGETS today, but count()/fix() already
+    accept arbitrary CLI paths -- this must stay safe regardless."""
+
+    def test_generated_from_with_embedded_quote_is_escaped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase_dir = _write_phase_dir(Path(tmp))
+            out_path = phase_dir / "13-LINT-REPORT.md"
+            lint._write_report(
+                out_path, phase_dir, "2026-01-01T00:00:00Z",
+                Path("/config.toml"),
+                generated_from='rumdl check "quoted path.md"',
+                violation_count=0,
+            )
+            text = out_path.read_text(encoding="utf-8")
+            line = next(l for l in text.splitlines() if l.startswith("generated_from:"))
+            self.assertEqual(
+                line, 'generated_from: "rumdl check \\"quoted path.md\\""'
+            )
+            self.assertEqual(text.count("---"), 2)
+
+
+class TestOutPathConfinement(unittest.TestCase):
+    """verify_post's out_path must go through confined() like pr_status.py's
+    sibling does -- a phase_dir outside project_root must raise rather than
+    silently write outside the resolved root."""
+
+    def test_out_path_confined_to_project_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase_dir = _write_phase_dir(Path(tmp))
+            with mock.patch("shutil.which", return_value=None):
+                lint.verify_post(str(phase_dir))
+            out_path = phase_dir / "13-LINT-REPORT.md"
+            self.assertTrue(out_path.exists())
+            self.assertTrue(out_path.resolve().is_relative_to(Path(tmp).resolve()))
 
 
 class TestCuratedRuleset(unittest.TestCase):

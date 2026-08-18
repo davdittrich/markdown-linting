@@ -105,7 +105,12 @@ def _write_report(out_path, phase_dir, generated_at, config_path, generated_from
     if unavailable_reason is not None:
         lines.append(f"unavailable_reason: {unavailable_reason}")
     lines.append(f"config: {config_path}")
-    lines.append(f'generated_from: "{generated_from}"')
+    # WR-03 (mirrors pr_status.py's fix): escape via json.dumps so a target
+    # path or invocation string containing a `"` cannot terminate this
+    # double-quoted YAML scalar early -- not reachable via LINT_TARGETS
+    # today, but count()/fix() already accept arbitrary CLI paths and this
+    # field must stay safe if verify_post ever grows the same override.
+    lines.append(f"generated_from: {json.dumps(generated_from)}")
     lines.append(f"generated_at: {generated_at}")
     lines.append("---\n")
     # D-03: count-only, no per-rule/per-file breakdown table. The banner
@@ -142,10 +147,20 @@ def verify_post(phase_dir_arg):
     already carry the signal, and a per-run append would accumulate noise
     on any machine without rumdl.
 
-    A rumdl returncode of 2 (config/runtime error) is NOT part of this
-    fail-open path -- count_violations raises RuntimeError for it, which
-    propagates uncaught, since a broken ruleset must never be silently
-    laundered into a fail-open zero.
+    A rumdl returncode of 2 (config/runtime error) is a DISTINCT loud path,
+    not the fail-open one above: count_violations raises RuntimeError for
+    it, which is caught here and returns exit 1 (not 0) -- a broken
+    ruleset must never be silently laundered into a fail-open zero. But
+    the report is still fully overwritten with the same non-numeric
+    `unavailable` sentinel the other paths use, distinguished by
+    `unavailable_reason`: under this dispatch point's `onError: skip`
+    contract, an UNCAUGHT exception here does not fail the phase -- it
+    only skips regenerating the report, leaving whatever the PREVIOUS
+    successful run wrote (e.g. `violation_count: 0`) stale on disk, which
+    is exactly the "stale status satisfies the gate" failure this whole
+    function exists to prevent. Catching and still writing keeps both
+    properties: the failure is loud (nonzero exit, printed message) AND
+    the artifact is never stale.
     """
     phase_dir = Path(phase_dir_arg).resolve()
     project_root = find_project_root(phase_dir)
@@ -154,7 +169,7 @@ def verify_post(phase_dir_arg):
     config_path = confined(project_root, *CONFIG_REL_PARTS)
     targets = [confined(project_root, t) for t in LINT_TARGETS]
     rumdl_argv = resolve_rumdl_invocation()
-    out_path = phase_dir / f"{padded_phase}-LINT-REPORT.md"
+    out_path = confined(project_root, phase_dir.relative_to(project_root), f"{padded_phase}-LINT-REPORT.md")
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     if rumdl_argv is None:
@@ -175,6 +190,15 @@ def verify_post(phase_dir_arg):
 
     try:
         violation_count = count_violations(config_path, targets, rumdl_argv)
+    except RuntimeError as exc:
+        print(f"rumdl config/runtime error: {exc}")
+        _write_report(
+            out_path, phase_dir, generated_at, config_path,
+            generated_from=" ".join(argv),
+            violation_count="unavailable",
+            unavailable_reason=f"RuntimeError: {exc}",
+        )
+        return 1
     except (subprocess.TimeoutExpired, OSError, subprocess.CalledProcessError) as exc:
         print(NOTICE)
         _write_report(
