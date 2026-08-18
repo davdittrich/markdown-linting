@@ -23,7 +23,7 @@ directly with the Read tool.
 
 **Disabled message:**
 
-```
+```text
 GSD > MARKDOWN LINTING REPORT
 
 Markdown linting is disabled (markdown-linting.enabled).
