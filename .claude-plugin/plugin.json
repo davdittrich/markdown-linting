@@ -1,0 +1,10 @@
+{
+  "name": "markdown-linting",
+  "version": "0.1.0",
+  "description": "Wraps rumdl over .planning/, README.md, and CLAUDE.md; verify:post writes a gate-readable violation-count report, ship:pre gates advisorily on it.",
+  "author": {
+    "name": "Dennis A. V. Dittrich",
+    "email": "davdittrich@gmail.com"
+  },
+  "license": "MIT"
+}

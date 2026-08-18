@@ -1,0 +1,67 @@
+{
+  "id": "markdown-linting",
+  "role": "feature",
+  "version": "0.1.0",
+  "title": "Markdown linting",
+  "description": "Wraps rumdl over .planning/, README.md, and CLAUDE.md; verify:post writes a gate-readable violation-count report, ship:pre gates advisorily on it.",
+  "tier": "full",
+  "requires": [],
+  "engines": {
+    "gsd": ">=1.6.0"
+  },
+  "runtimeCompat": {
+    "supported": [
+      "*"
+    ],
+    "unsupported": []
+  },
+  "skills": [
+    "markdown-linting-report"
+  ],
+  "agents": [],
+  "hooks": [],
+  "config": {
+    "markdown-linting.enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "Master toggle for the markdown-linting capability."
+    },
+    "markdown-linting.ship_gate": {
+      "type": "boolean",
+      "default": true,
+      "description": "When true, ship:pre advises (never blocks -- MDL-05 defers blocking to v2) on violation_count!=0 in LINT-REPORT.md."
+    }
+  },
+  "steps": [
+    {
+      "point": "verify:post",
+      "ref": {
+        "skill": "markdown-linting-report"
+      },
+      "produces": [
+        "LINT-REPORT.md"
+      ],
+      "consumes": [],
+      "when": "markdown-linting.enabled",
+      "onError": "skip"
+    }
+  ],
+  "contributions": [],
+  "gates": [
+    {
+      "point": "ship:pre",
+      "check": {
+        "predicate": {
+          "kind": "artifact-frontmatter-equals",
+          "artifact": "LINT-REPORT.md",
+          "field": "violation_count",
+          "equals": 0
+        }
+      },
+      "when": "markdown-linting.ship_gate",
+      "blocking": false,
+      "onError": "skip",
+      "description": "Advisory only (MDL-03/MDL-05): a nonzero violation_count surfaces a warning at ship:pre but never blocks. Deliberately not the sota-numerics onError:halt exception."
+    }
+  ]
+}
