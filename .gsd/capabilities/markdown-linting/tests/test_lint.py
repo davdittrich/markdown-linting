@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -588,6 +589,50 @@ class TestCliPathsResolveAgainstCwd(unittest.TestCase):
             with mock.patch.object(lint.Path, "cwd", return_value=sub):
                 targets = lint.resolve_targets(root, ["x.md"])
             self.assertEqual(targets, [sub / "x.md"])
+
+
+class TestShipGateRemeasures(unittest.TestCase):
+    """The frontmatter gate only reads verify:post's verdict, so edits made
+    after it pass on a stale 0. The command gate re-measures at ship:pre."""
+
+    BUNDLE = Path(__file__).resolve().parent.parent
+
+    def _gate(self):
+        caps = json.loads((self.BUNDLE / "capability.json").read_text(encoding="utf-8"))
+        gates = [
+            g for g in caps["gates"]
+            if g["point"] == "ship:pre" and g["check"]["predicate"]["kind"] == "command-exit-zero"
+        ]
+        self.assertEqual(len(gates), 1)
+        self.assertIs(gates[0]["blocking"], False)
+        return gates[0]
+
+    def _exit_code(self, fixture, env_extra):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".planning").mkdir()
+            (root / "README.md").write_text(
+                (FIXTURES_DIR / fixture).read_text(encoding="utf-8"), encoding="utf-8"
+            )
+            env = {**os.environ, **env_extra(root)}
+            return subprocess.run(
+                ["sh", "-c", self._gate()["check"]["predicate"]["command"]],
+                cwd=root, env=env, capture_output=True,
+            ).returncode
+
+    @unittest.skipUnless(_rumdl_available(), "neither rumdl nor uvx is available")
+    def test_clean_tree_exits_zero_and_dirty_tree_does_not(self):
+        env = lambda root: {"CLAUDE_PROJECT_DIR": str(self.BUNDLE.parents[2])}
+        self.assertEqual(self._exit_code("clean.md", env), 0)
+        self.assertNotEqual(self._exit_code("dirty.md", env), 0)
+
+    @unittest.skipUnless(_rumdl_available(), "neither rumdl nor uvx is available")
+    def test_falls_back_to_gsd_home_when_project_has_no_bundle(self):
+        def env(root):
+            home = root / "home"
+            shutil.copytree(self.BUNDLE, home / ".gsd" / "capabilities" / "markdown-linting")
+            return {"CLAUDE_PROJECT_DIR": str(root), "GSD_HOME": str(home)}
+        self.assertEqual(self._exit_code("clean.md", env), 0)
 
 
 if __name__ == "__main__":
