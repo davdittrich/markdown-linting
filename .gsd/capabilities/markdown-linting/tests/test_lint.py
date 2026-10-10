@@ -601,6 +601,21 @@ class TestPathResolutionFailure(unittest.TestCase):
             self.assertEqual(exit_code, 1)
             self.assertFalse(list(Path(outside).iterdir()))
 
+    def test_symlinked_default_target_escaping_root_writes_sentinel_and_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            phase_dir = _write_phase_dir(Path(tmp))
+            report = phase_dir / "13-LINT-REPORT.md"
+            report.write_text("---\nviolation_count: 0\n---\n", encoding="utf-8")
+            (Path(outside) / "x.md").write_text("# x\n", encoding="utf-8")
+            (Path(tmp) / "CLAUDE.md").symlink_to(Path(outside) / "x.md")
+            exit_code, err = self._run(phase_dir)
+            self.assertEqual(exit_code, 1)
+            self.assertIn("escapes project root", err)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("violation_count: unavailable", text)
+            self.assertNotIn("violation_count: 0\n", text)
+            self.assertIn("unavailable_reason", text)
+
 
 class TestRumdlPresentInCI(unittest.TestCase):
     """The real-rumdl tests above skip when no linter is reachable; on CI

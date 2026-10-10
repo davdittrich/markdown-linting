@@ -242,13 +242,26 @@ def verify_post(phase_dir_arg):
         project_root = find_project_root(phase_dir)
         padded_phase = phase_dir.name.split("-", 1)[0]
         config_path = CONFIG_PATH
-        targets = resolve_targets(project_root)
         out_path = confined(project_root, phase_dir.relative_to(project_root), f"{padded_phase}-LINT-REPORT.md")
     except (ValueError, OSError) as exc:
         print(f"verify-post: {exc}", file=sys.stderr)
         return 1
-    rumdl_argv = resolve_rumdl_invocation()
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Once out_path is known a failure must still overwrite the report: an
+    # out-of-root symlinked default target would otherwise leave the previous
+    # `violation_count: 0` on disk for the ship:pre gate to read.
+    try:
+        targets = resolve_targets(project_root)
+    except (ValueError, OSError) as exc:
+        print(f"verify-post: {exc}", file=sys.stderr)
+        _write_report(
+            out_path, phase_dir, generated_at, config_path,
+            generated_from="none (target resolution failed)",
+            violation_count="unavailable",
+            unavailable_reason=f"{type(exc).__name__}: {exc}",
+        )
+        return 1
+    rumdl_argv = resolve_rumdl_invocation()
 
     if rumdl_argv is None:
         print(NOTICE)
