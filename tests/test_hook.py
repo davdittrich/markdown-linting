@@ -133,6 +133,17 @@ class TestBundleHash(HookCase):
 
         self.assertNotEqual(self.hash_of(to("a")), self.hash_of(to("b")))
 
+    def test_symlinked_file_content_change_changes_hash(self):
+        # Staging uses cp -RL, so the installed copy tracks the target's content.
+        def with_target_text(text):
+            def populate(b):
+                outside = b.parent / "outside.txt"
+                outside.write_text(text)
+                (b / "link").symlink_to(outside)
+            return populate
+
+        self.assertNotEqual(self.hash_of(with_target_text("A")), self.hash_of(with_target_text("B")))
+
     def test_edit_outside_bundle_files_keeps_hash_and_skips_install(self):
         self.populate_bundle()
         self.run_hook()

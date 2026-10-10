@@ -2,7 +2,7 @@
 # Vendored auto-install hook: a copy per plugin, not shared at runtime. See
 # davdittrich/ponytail-everywhere's hooks/capability-auto-install.sh for the sibling copy.
 #
-# The bundle files sit at the plugin root so that `gsd capability install
+# The bundle files sit at the plugin root so that `gsd-tools capability install
 # <git url>` also works (URL import reads capability.json at the repo root).
 # Only BUNDLE_FILES are hashed and staged, never the rest of the checkout
 # (.git, hooks, tests, README, __pycache__).
@@ -18,6 +18,9 @@ CAP_ID="${1:-}"
 # but validate the id shape gsd-core itself enforces before it reaches any
 # path construction.
 [[ "$CAP_ID" =~ ^[a-z][a-z0-9-]*$ ]] || exit 0
+
+# No home directory to install under (set -u would abort with a leaked error).
+[ -n "${GSD_HOME:-${HOME:-}}" ] || exit 0
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 BUNDLE_SRC="$PLUGIN_ROOT"
@@ -36,18 +39,17 @@ fi
 # Every path under the bundle files, relative to BUNDLE_SRC, minus
 # __pycache__ (running the tests in the plugin root writes one).
 bundle_paths() {
-  (cd "$BUNDLE_SRC" && find "${BUNDLE_FILES[@]}" -name __pycache__ -prune -o "$@" -print 2>/dev/null) | LC_ALL=C sort
+  (cd "$BUNDLE_SRC" && find -L "${BUNDLE_FILES[@]}" -name __pycache__ -prune -o "$@" -print 2>/dev/null) | LC_ALL=C sort
 }
 
 # Bundle hash over exactly the staged files: LC_ALL=C-sorted list of every
-# path (files, directories and symlinks, so an added empty directory is
-# caught), each symlink's target, then one content hash per sorted regular
-# file. Per-file hashes keep file boundaries: raw concatenation hashed
+# path (files and directories, so an added empty directory is caught), then
+# one content hash per sorted regular file. Symlinks are followed (find -L),
+# matching the `cp -RL` staging, so a changed link target's content is caught. Per-file hashes keep file boundaries: raw concatenation hashed
 # identically when bytes moved between files.
 bundle_hash() {
   {
-    bundle_paths \( -type f -o -type d -o -type l \)
-    bundle_paths -type l | while IFS= read -r _l; do readlink "$BUNDLE_SRC/$_l"; done
+    bundle_paths \( -type f -o -type d \)
     bundle_paths -type f | while IFS= read -r _f; do (cd "$BUNDLE_SRC" && "${HASH_CMD[@]}" "$_f"); done
   } | "${HASH_CMD[@]}" | awk '{print $1}'
 }

@@ -70,15 +70,21 @@ Without the plugin, install the capability straight from git (it materializes un
 `~/.gsd/capabilities/markdown-linting/`):
 
 ```bash
-gsd-tools capability install https://github.com/davdittrich/markdown-linting.git#v0.3.0 --scope global --yes
+gsd-tools capability install https://github.com/davdittrich/markdown-linting.git --scope global --yes
 ```
+
+Omit `#<ref>`: gsd-core clones with `--depth 1` and then checks the ref out, so a tag or branch
+other than the default-branch tip fails with `invalid reference`. A git-URL install also copies
+the whole checkout (`.git`, `tests`, `hooks`), which the plugin hook avoids by staging only the
+bundle files. Where `gsd-tools` is not on `PATH`, run `node ~/.claude/gsd-core/bin/gsd-tools.cjs`.
 
 **Migrating to 0.3.0 (bundle at the repo root):** `capability.json`, `config/`, `scripts/`, and
 `skills/` moved from `.gsd/capabilities/markdown-linting/` to the repository root so
-`gsd capability install <git url>` works. Plugin users re-grant automatically at the next
+`gsd-tools capability install <git url>` works. Plugin users re-grant automatically at the next
 `SessionStart` (the bundle hash changes with the layout). A project-scope consent recorded for the
-old path goes stale: re-run
-`gsd-tools capability install /path/to/markdown-linting --scope project --yes`.
+old path goes stale: re-run it from a clean export, never from a checkout (a copied `.git` becomes an
+embedded repository in the project):
+`git -C /path/to/markdown-linting archive HEAD | tar -x -C /tmp/ml && gsd-tools capability install /tmp/ml --scope project --yes`.
 
 ## Uninstall
 
