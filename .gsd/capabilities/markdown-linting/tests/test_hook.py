@@ -122,5 +122,15 @@ class TestBundleHash(HookCase):
         self.assertNotEqual(self.hash_of(to("x")), self.hash_of(to("y")))
 
 
+class TestGitignore(unittest.TestCase):
+    def test_tool_caches_are_ignored(self):
+        for cache in (".pytest_cache/x", ".rumdl_cache/x"):
+            with self.subTest(cache=cache):
+                result = subprocess.run(
+                    ["git", "check-ignore", "-q", cache], cwd=REPO
+                )
+                self.assertEqual(result.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
