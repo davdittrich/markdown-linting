@@ -1,7 +1,7 @@
 {
   "id": "markdown-linting",
   "role": "feature",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "Markdown linting",
   "description": "Wraps rumdl over .planning/, README.md, and CLAUDE.md; verify:post writes a gate-readable violation-count report, ship:pre gates advisorily on it.",
   "tier": "full",
