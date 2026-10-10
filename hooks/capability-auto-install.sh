@@ -100,8 +100,25 @@ fi
 
 # Spec is always the absolute bundle dir -- a relative spec would
 # resolve against the end user's cwd, not the plugin. User scope maps to the CLI's literal --scope global value.
-"${GSD_TOOLS[@]}" capability install "$BUNDLE_DIR" --scope global --yes >/dev/null 2>&1
-INSTALL_STATUS=$?
+# --yes only when the staged manifest declares none of gsd-core's executable
+# surfaces (src/capability-trust.cts hasExecutable): an update that adds hooks,
+# commands, mcpServers or a reviewer lane needs the user's own consent, never an
+# unattended SessionStart grant. Unparseable manifest = executable (fail closed).
+# </dev/null: a consent prompt must never read the session's stdin.
+if node -e '
+  const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const arr = (v) => Array.isArray(v) && v.length > 0;
+  const obj = (v) => v !== null && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length > 0;
+  process.exit(arr(m.hooks) || arr(m.commands) || arr(m.mcpServers) || obj(m.mcpServers) || obj(m.reviewer) ? 1 : 0);
+' "$BUNDLE_DIR/capability.json" >/dev/null 2>&1; then
+  "${GSD_TOOLS[@]}" capability install "$BUNDLE_DIR" --scope global --yes </dev/null >/dev/null 2>&1
+  INSTALL_STATUS=$?
+else
+  # gsd-core discloses and aborts without --yes. No hash write: next session re-reminds.
+  "${GSD_TOOLS[@]}" capability install "$BUNDLE_DIR" --scope global </dev/null >/dev/null 2>&1
+  echo "capability-auto-install: $CAP_ID declares executable surfaces, not auto-consented; review with: gsd-tools capability install $BUNDLE_DIR --scope global" >&2
+  exit 0
+fi
 
 if [ "$INSTALL_STATUS" -eq 0 ]; then
   printf 'Auto-installed capability: %s (user scope)\n' "$CAP_ID"

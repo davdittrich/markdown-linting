@@ -210,6 +210,58 @@ class TestStaging(HookCase):
         self.assertFalse((self.home / ".gsd" / f"capability-auto-install-{CAP}.hash").exists())
 
 
+class TestConsentGate(HookCase):
+    """--yes only for a declarative manifest; executable surfaces need the user's consent."""
+
+    def setUp(self):
+        super().setUp()
+        self.stub_on_path(script=ARGS_SCRIPT)
+        self.populate_bundle()
+        self.stage = self.home / ".gsd" / f"capability-bundle-{CAP}"
+
+    def set_manifest(self, text):
+        (self.plugin / "capability.json").write_text(text)
+
+    def assert_withheld(self, result):
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(self.logged(), f"capability install {self.stage} --scope global".split())
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn(f"gsd-tools capability install {self.stage} --scope global", result.stderr)
+        self.assertFalse((self.home / ".gsd" / f"capability-auto-install-{CAP}.hash").exists())
+
+    def test_hooks_entry_withholds_yes(self):
+        self.set_manifest('{"hooks":[{"event":"SessionStart","script":"x.sh"}]}')
+        self.assert_withheld(self.run_hook())
+
+    def test_each_executable_surface_withholds_yes(self):
+        for m in ('{"commands":["c"]}', '{"mcpServers":["s"]}',
+                  '{"mcpServers":{"s":{"command":"x"}}}', '{"reviewer":{"cmd":"x"}}'):
+            with self.subTest(manifest=m):
+                self.log.unlink(missing_ok=True)
+                self.set_manifest(m)
+                self.assert_withheld(self.run_hook())
+
+    def test_unparseable_manifest_fails_closed(self):
+        self.set_manifest("{not json")
+        self.assert_withheld(self.run_hook())
+
+    def test_declarative_manifest_keeps_yes(self):
+        self.set_manifest('{"hooks":[],"commands":[],"mcpServers":[],"reviewer":{}}')
+        result = self.run_hook()
+        self.assertEqual(self.logged(), f"capability install {self.stage} --scope global --yes".split())
+        self.assertEqual(result.stderr, "")
+        self.assertTrue((self.home / ".gsd" / f"capability-auto-install-{CAP}.hash").exists())
+
+    def test_install_never_reads_session_stdin(self):
+        self.stub_on_path(script='#!/bin/sh\nread -r l && printf "%s" "$l" > "$GSD_TEST_LOG"\n')
+        env = {"PATH": f"{self.bin}:/usr/bin:/bin", "HOME": str(self.tmp / "nohome"),
+               "GSD_HOME": str(self.home), "CLAUDE_PLUGIN_ROOT": str(self.plugin),
+               "GSD_TEST_LOG": str(self.log)}
+        subprocess.run(["bash", str(HOOK), CAP], input="y\n", env=env, text=True,
+                       capture_output=True, cwd=self.tmp)
+        self.assertEqual(self.logged(), [])
+
+
 class TestGitignore(unittest.TestCase):
     def test_tool_caches_are_ignored(self):
         # A scratch repo carrying only .gitignore, so the test also runs from
