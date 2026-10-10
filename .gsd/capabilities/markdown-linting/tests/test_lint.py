@@ -538,5 +538,32 @@ class TestConfigLocation(unittest.TestCase):
             self.assertEqual(Path(argv[argv.index("--config") + 1]), REAL_CONFIG_PATH)
 
 
+class TestPathResolutionFailure(unittest.TestCase):
+    """verify_post's contract is never to raise past onError:skip (that
+    leaves a stale report): a phase dir that cannot be resolved to a
+    confined report path is a loud exit 1, not an uncaught exception."""
+
+    def _run(self, phase_dir):
+        err = io.StringIO()
+        with mock.patch("sys.stdout", io.StringIO()), mock.patch("sys.stderr", err):
+            exit_code = lint.verify_post(str(phase_dir))
+        return exit_code, err.getvalue()
+
+    def test_missing_phase_dir_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase_dir = _write_phase_dir(Path(tmp)).parent / "99-missing"
+            exit_code, err = self._run(phase_dir)
+            self.assertEqual(exit_code, 1)
+            self.assertIn("99-missing", err)
+
+    def test_symlinked_phase_dir_escaping_root_exits_1(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            link = _write_phase_dir(Path(tmp)).parent / "98-link"
+            link.symlink_to(outside, target_is_directory=True)
+            exit_code, err = self._run(link)
+            self.assertEqual(exit_code, 1)
+            self.assertFalse(list(Path(outside).iterdir()))
+
+
 if __name__ == "__main__":
     unittest.main()

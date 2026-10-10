@@ -233,14 +233,22 @@ def verify_post(phase_dir_arg):
     properties: the failure is loud (nonzero exit, printed message) AND
     the artifact is never stale.
     """
-    phase_dir = Path(phase_dir_arg).resolve()
-    project_root = find_project_root(phase_dir)
-    padded_phase = phase_dir.name.split("-", 1)[0]
-
-    config_path = CONFIG_PATH
-    targets = resolve_targets(project_root)
+    # Path resolution raises on a missing/unconfined phase dir; under
+    # onError:skip an escape would leave the previous report stale, so exit
+    # 1 loudly instead (no confined report path exists to overwrite).
+    try:
+        phase_dir = Path(phase_dir_arg).resolve()
+        if not phase_dir.is_dir():
+            raise ValueError(f"phase directory not found: {phase_dir}")
+        project_root = find_project_root(phase_dir)
+        padded_phase = phase_dir.name.split("-", 1)[0]
+        config_path = CONFIG_PATH
+        targets = resolve_targets(project_root)
+        out_path = confined(project_root, phase_dir.relative_to(project_root), f"{padded_phase}-LINT-REPORT.md")
+    except (ValueError, OSError) as exc:
+        print(f"verify-post: {exc}", file=sys.stderr)
+        return 1
     rumdl_argv = resolve_rumdl_invocation()
-    out_path = confined(project_root, phase_dir.relative_to(project_root), f"{padded_phase}-LINT-REPORT.md")
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     if rumdl_argv is None:
