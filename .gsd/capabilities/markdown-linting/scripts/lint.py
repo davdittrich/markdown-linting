@@ -124,7 +124,8 @@ def run_rumdl(argv):
         argv, capture_output=True, text=True, timeout=RUMDL_TIMEOUT_SECONDS
     )
     if result.returncode == 2:
-        raise RuntimeError(f"rumdl config/runtime error: {result.stderr}")
+        first = next((ln for ln in result.stderr.splitlines() if ln.strip()), "")
+        raise RuntimeError(f"rumdl config/runtime error: {first}")
     if result.returncode not in (0, 1):
         raise subprocess.CalledProcessError(
             result.returncode, argv, result.stdout, result.stderr
@@ -202,14 +203,14 @@ def verify_post(phase_dir_arg):
     `{phase_dir}/{padded_phase}-LINT-REPORT.md`, never merging a prior
     hand edit.
 
-    MDL-04 fail-open path (rumdl+uvx absent, a live rumdl call raising
-    TimeoutExpired/OSError, rumdl exiting with an unexpected crash code
-    reported as CalledProcessError, or rumdl emitting output that is not a
-    JSON array -- ValueError, which json.JSONDecodeError subclasses):
-    print NOTICE exactly once and still
-    fully overwrite the report, with a non-numeric
+    MDL-04 fail-open path (rumdl+uvx absent; a live rumdl call raising
+    TimeoutExpired/OSError; rumdl exiting with an unexpected crash code
+    reported as CalledProcessError; or rumdl emitting output that is not a
+    JSON array -- ValueError, which json.JSONDecodeError subclasses): exit
+    0 and still fully overwrite the report, with a non-numeric
     `violation_count: unavailable` sentinel that cannot satisfy the
-    ship:pre gate's `equals: 0` predicate.
+    ship:pre gate's `equals: 0` predicate. Only the absent case prints
+    NOTICE (it names both tiers checked); the others print a one-line cause.
 
     This is a **deliberate divergence** from
     beads/scripts/sync.py::regenerate_beads_md, which returns without
@@ -280,7 +281,9 @@ def verify_post(phase_dir_arg):
         )
         return 1
     except (subprocess.TimeoutExpired, OSError, subprocess.CalledProcessError, ValueError) as exc:
-        print(NOTICE)
+        # NOTICE claims PATH and uvx were both checked -- true only on the
+        # absent path above; here rumdl ran (or tried to), so name the cause.
+        print(f"rumdl failed, lint skipped ({type(exc).__name__}): {str(exc).splitlines()[0] if str(exc) else ''}")
         _write_report(
             out_path, phase_dir, generated_at, config_path,
             generated_from=" ".join(argv),

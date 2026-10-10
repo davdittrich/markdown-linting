@@ -111,7 +111,9 @@ class TestFailOpen(unittest.TestCase):
                         exit_code = lint.verify_post(str(phase_dir))
 
             self.assertEqual(exit_code, 0)
-            self.assertEqual(captured.getvalue().count(lint.NOTICE), 1)
+            # NOTICE says "checked PATH and uvx" -- false when rumdl was found.
+            self.assertNotIn(lint.NOTICE, captured.getvalue())
+            self.assertIn("TimeoutExpired", captured.getvalue())
             text = (phase_dir / "13-LINT-REPORT.md").read_text(encoding="utf-8")
             self.assertIn("violation_count: unavailable", text)
 
@@ -128,7 +130,8 @@ class TestFailOpen(unittest.TestCase):
                         exit_code = lint.verify_post(str(phase_dir))
 
             self.assertEqual(exit_code, 0)
-            self.assertEqual(captured.getvalue().count(lint.NOTICE), 1)
+            self.assertNotIn(lint.NOTICE, captured.getvalue())
+            self.assertIn("OSError", captured.getvalue())
             text = (phase_dir / "13-LINT-REPORT.md").read_text(encoding="utf-8")
             self.assertIn("violation_count: unavailable", text)
 
@@ -164,6 +167,25 @@ class TestFailOpen(unittest.TestCase):
             self.assertIn('unavailable_reason: "RuntimeError', text)
             self.assertNotIn("violation_count: 0\n", text)
 
+    def test_config_error_prints_only_first_stderr_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase_dir = _write_phase_dir(Path(tmp))
+            completed = subprocess.CompletedProcess(
+                args=["rumdl"], returncode=2, stdout="",
+                stderr="bad config\n" + "stack frame\n" * 50,
+            )
+            captured = io.StringIO()
+            with mock.patch(
+                "shutil.which",
+                side_effect=lambda name: "/usr/bin/rumdl" if name == "rumdl" else None,
+            ):
+                with mock.patch("subprocess.run", return_value=completed):
+                    with mock.patch("sys.stdout", captured):
+                        lint.verify_post(str(phase_dir))
+
+            self.assertIn("bad config", captured.getvalue())
+            self.assertNotIn("stack frame", captured.getvalue())
+
     def test_unexpected_exit_code_fail_open_overwrites_stale_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             phase_dir = _write_phase_dir(Path(tmp))
@@ -186,7 +208,8 @@ class TestFailOpen(unittest.TestCase):
                         exit_code = lint.verify_post(str(phase_dir))
 
             self.assertEqual(exit_code, 0)
-            self.assertEqual(captured.getvalue().count(lint.NOTICE), 1)
+            self.assertNotIn(lint.NOTICE, captured.getvalue())
+            self.assertIn("CalledProcessError", captured.getvalue())
             text = report_path.read_text(encoding="utf-8")
             self.assertNotEqual(text, before_text)
             self.assertIn("violation_count: unavailable", text)
@@ -223,7 +246,7 @@ class TestFailOpen(unittest.TestCase):
                                 exit_code = lint.verify_post(str(phase_dir))
 
                     self.assertEqual(exit_code, 0)
-                    self.assertEqual(captured.getvalue().count(lint.NOTICE), 1)
+                    self.assertNotIn(lint.NOTICE, captured.getvalue())
                     text = report_path.read_text(encoding="utf-8")
                     self.assertIn("violation_count: unavailable", text)
                     self.assertNotIn("violation_count: 0\n", text)
