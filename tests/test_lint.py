@@ -1,4 +1,4 @@
-"""Tests for .gsd/capabilities/markdown-linting/scripts/lint.py.
+"""Tests for scripts/lint.py.
 
 Stdlib unittest only: the suite must pass under
 `python3 -m unittest discover` with no third-party test runner installed.
@@ -619,7 +619,7 @@ class TestPathResolutionFailure(unittest.TestCase):
 
 class TestRumdlPinMatchesCI(unittest.TestCase):
     def test_ci_pin_equals_uvx_spec(self):
-        ci = Path(__file__).resolve().parents[4] / ".github" / "workflows" / "ci.yml"
+        ci = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
         pinned = re.search(r"rumdl==(\S+)", ci.read_text(encoding="utf-8")).group(1)
         self.assertEqual(f"rumdl=={pinned}", lint.RUMDL_UVX_SPEC)
 
@@ -652,6 +652,14 @@ class TestShipGateRemeasures(unittest.TestCase):
     after it pass on a stale 0. The one ship:pre gate re-measures instead."""
 
     BUNDLE = Path(__file__).resolve().parent.parent
+
+    def _install(self, home):
+        """Copy only the files the hook stages, as a materialized install does."""
+        dest = home / ".gsd" / "capabilities" / "markdown-linting"
+        dest.mkdir(parents=True)
+        shutil.copy(self.BUNDLE / "capability.json", dest)
+        for d in ("config", "scripts"):
+            shutil.copytree(self.BUNDLE / d, dest / d)
 
     def _gate(self):
         caps = json.loads((self.BUNDLE / "capability.json").read_text(encoding="utf-8"))
@@ -690,7 +698,9 @@ class TestShipGateRemeasures(unittest.TestCase):
 
     @unittest.skipUnless(_rumdl_available(), "neither rumdl nor uvx is available")
     def test_clean_tree_exits_zero_and_dirty_tree_does_not(self):
-        env = lambda root: {"CLAUDE_PROJECT_DIR": str(self.BUNDLE.parents[2])}
+        def env(root):
+            self._install(root)
+            return {"CLAUDE_PROJECT_DIR": str(root)}
         self.assertEqual(self._exit_code("clean.md", env), 0)
         self.assertNotEqual(self._exit_code("dirty.md", env), 0)
 
@@ -698,7 +708,7 @@ class TestShipGateRemeasures(unittest.TestCase):
     def test_falls_back_to_gsd_home_when_project_has_no_bundle(self):
         def env(root):
             home = root / "home"
-            shutil.copytree(self.BUNDLE, home / ".gsd" / "capabilities" / "markdown-linting")
+            self._install(home)
             return {"CLAUDE_PROJECT_DIR": str(root), "GSD_HOME": str(home)}
         self.assertEqual(self._exit_code("clean.md", env), 0)
 

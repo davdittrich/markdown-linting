@@ -7,10 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[4]
+REPO = Path(__file__).resolve().parents[1]
 HOOK = REPO / "hooks" / "capability-auto-install.sh"
 CAP = "markdown-linting"
 MARK_SCRIPT = '#!/bin/sh\necho %s >> "$GSD_TEST_LOG"\n'
+ARGS_SCRIPT = '#!/bin/sh\necho "$@" >> "$GSD_TEST_LOG"\n'
+BUNDLE_FILES = ["capability.json", "config", "scripts", "skills"]
 
 
 class HookCase(unittest.TestCase):
@@ -19,8 +21,7 @@ class HookCase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name).resolve()
         self.plugin = self.tmp / "plugin"
-        self.bundle = self.plugin / ".gsd" / "capabilities" / CAP
-        self.bundle.mkdir(parents=True)
+        self.plugin.mkdir()
         self.home = self.tmp / "home"
         self.bin = self.tmp / "bin"
         self.bin.mkdir()
@@ -29,10 +30,16 @@ class HookCase(unittest.TestCase):
         (self.bin / "node").symlink_to(shutil.which("node"))
         self.log = self.tmp / "log"
 
-    def stub_on_path(self, marker="path"):
+    def stub_on_path(self, marker="path", script=None):
         stub = self.bin / "gsd-tools"
-        stub.write_text(MARK_SCRIPT % marker)
+        stub.write_text(script or MARK_SCRIPT % marker)
         stub.chmod(0o755)
+
+    def populate_bundle(self):
+        (self.plugin / "capability.json").write_text("{}")
+        for d in ("config", "scripts", "skills"):
+            (self.plugin / d).mkdir(exist_ok=True)
+            (self.plugin / d / "f").write_text(d)
 
     def write_cjs(self, root, marker):
         cjs = root / "gsd-core" / "bin" / "gsd-tools.cjs"
@@ -65,7 +72,7 @@ class HookCase(unittest.TestCase):
 class TestGsdToolsResolution(HookCase):
     def setUp(self):
         super().setUp()
-        (self.bundle / "capability.json").write_text("{}")
+        self.populate_bundle()
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
@@ -97,10 +104,11 @@ class TestBundleHash(HookCase):
         self.stub_on_path()
 
     def hash_of(self, populate):
-        shutil.rmtree(self.bundle)
-        self.bundle.mkdir(parents=True)
+        shutil.rmtree(self.plugin)
+        self.plugin.mkdir()
+        self.populate_bundle()
         shutil.rmtree(self.home, ignore_errors=True)
-        populate(self.bundle)
+        populate(self.plugin / "scripts")
         self.run_hook()
         return self.state_hash()
 
@@ -117,9 +125,78 @@ class TestBundleHash(HookCase):
 
     def test_symlink_target_change_changes_hash(self):
         def to(target):
-            return lambda b: (b / "link").symlink_to(target)
+            def populate(b):
+                (b / "a").write_text("A")
+                (b / "b").write_text("B")
+                (b / "link").symlink_to(target)
+            return populate
 
-        self.assertNotEqual(self.hash_of(to("x")), self.hash_of(to("y")))
+        self.assertNotEqual(self.hash_of(to("a")), self.hash_of(to("b")))
+
+    def test_edit_outside_bundle_files_keeps_hash_and_skips_install(self):
+        self.populate_bundle()
+        self.run_hook()
+        before = self.state_hash()
+        for extra in ("README.md", "tests/x", "hooks/x", "scripts/__pycache__/lint.pyc"):
+            path = self.plugin / extra
+            path.parent.mkdir(exist_ok=True)
+            path.write_text("edit")
+        self.log.unlink()
+        self.run_hook()
+        self.assertEqual(self.state_hash(), before)
+        self.assertEqual(self.logged(), [])
+
+    def test_edit_to_bundle_file_reinstalls(self):
+        self.populate_bundle()
+        self.run_hook()
+        (self.plugin / "skills" / "f").write_text("changed")
+        self.log.unlink()
+        self.run_hook()
+        self.assertEqual(self.logged(), ["path"])
+
+
+class TestStaging(HookCase):
+    def setUp(self):
+        super().setUp()
+        self.stub_on_path(script=ARGS_SCRIPT)
+        self.stage = self.home / ".gsd" / f"capability-bundle-{CAP}"
+
+    def test_installs_staged_bundle_files_only(self):
+        self.populate_bundle()
+        for extra in ("README.md", "LICENSE", "tests/t.py", "hooks/h.sh", ".git/HEAD",
+                      "scripts/__pycache__/lint.pyc"):
+            path = self.plugin / extra
+            path.parent.mkdir(exist_ok=True)
+            path.write_text("x")
+        self.run_hook()
+        self.assertEqual(sorted(p.name for p in self.stage.iterdir()), sorted(BUNDLE_FILES))
+        self.assertFalse((self.stage / "scripts" / "__pycache__").exists())
+        self.assertEqual((self.stage / "skills" / "f").read_text(), "skills")
+        self.assertEqual(
+            self.logged(),
+            f"capability install {self.stage} --scope global --yes".split(),
+        )
+
+    def test_restage_drops_removed_files(self):
+        self.populate_bundle()
+        (self.plugin / "scripts" / "old").write_text("x")
+        self.run_hook()
+        (self.plugin / "scripts" / "old").unlink()
+        self.run_hook()
+        self.assertFalse((self.stage / "scripts" / "old").exists())
+
+    def test_no_root_manifest_exits_silently(self):
+        result = self.run_hook()
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+        self.assertEqual(self.logged(), [])
+
+    def test_staging_failure_reports_and_does_not_install(self):
+        self.populate_bundle()
+        shutil.rmtree(self.plugin / "skills")
+        result = self.run_hook()
+        self.assertIn("staging failed", result.stderr)
+        self.assertEqual(self.logged(), [])
+        self.assertFalse((self.home / ".gsd" / f"capability-auto-install-{CAP}.hash").exists())
 
 
 class TestGitignore(unittest.TestCase):

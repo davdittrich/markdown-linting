@@ -2,7 +2,12 @@
 # Vendored auto-install hook: a copy per plugin, not shared at runtime. See
 # davdittrich/ponytail-everywhere's hooks/capability-auto-install.sh for the sibling copy.
 #
-# Detects bundle drift via a whole-directory hash and re-installs the
+# The bundle files sit at the plugin root so that `gsd capability install
+# <git url>` also works (URL import reads capability.json at the repo root).
+# Only BUNDLE_FILES are hashed and staged, never the rest of the checkout
+# (.git, hooks, tests, README, __pycache__).
+#
+# Detects bundle drift via a hash of the bundle files and re-installs the
 # capability at global ("user") scope when the hash changed.
 # Never aborts the session: no `set -e`.
 set -u
@@ -15,8 +20,9 @@ CAP_ID="${1:-}"
 [[ "$CAP_ID" =~ ^[a-z][a-z0-9-]*$ ]] || exit 0
 
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-BUNDLE_DIR="$PLUGIN_ROOT/.gsd/capabilities/$CAP_ID"
-[ -d "$BUNDLE_DIR" ] || exit 0
+BUNDLE_SRC="$PLUGIN_ROOT"
+[ -f "$BUNDLE_SRC/capability.json" ] || exit 0
+BUNDLE_FILES=(capability.json config scripts skills)
 
 # Portable hash tool selection (macOS ships no sha256sum).
 if command -v sha256sum >/dev/null 2>&1; then
@@ -27,17 +33,22 @@ else
   exit 0
 fi
 
-# Whole-bundle-directory hash: LC_ALL=C-sorted list of every path
-# under the bundle (files, directories and symlinks, so an added empty
-# directory is caught), each symlink's target, then one
-# content hash per sorted regular file. Per-file hashes keep file
-# boundaries: raw concatenation hashed identically when bytes moved
-# between files.
+# Every path under the bundle files, relative to BUNDLE_SRC, minus
+# __pycache__ (running the tests in the plugin root writes one).
+bundle_paths() {
+  (cd "$BUNDLE_SRC" && find "${BUNDLE_FILES[@]}" -name __pycache__ -prune -o "$@" -print 2>/dev/null) | LC_ALL=C sort
+}
+
+# Bundle hash over exactly the staged files: LC_ALL=C-sorted list of every
+# path (files, directories and symlinks, so an added empty directory is
+# caught), each symlink's target, then one content hash per sorted regular
+# file. Per-file hashes keep file boundaries: raw concatenation hashed
+# identically when bytes moved between files.
 bundle_hash() {
   {
-    find "$BUNDLE_DIR" \( -type f -o -type d -o -type l \) | LC_ALL=C sort
-    find "$BUNDLE_DIR" -type l | LC_ALL=C sort | while IFS= read -r _l; do readlink "$_l"; done
-    find "$BUNDLE_DIR" -type f | LC_ALL=C sort | while IFS= read -r _f; do "${HASH_CMD[@]}" "$_f"; done
+    bundle_paths \( -type f -o -type d -o -type l \)
+    bundle_paths -type l | while IFS= read -r _l; do readlink "$BUNDLE_SRC/$_l"; done
+    bundle_paths -type f | while IFS= read -r _f; do (cd "$BUNDLE_SRC" && "${HASH_CMD[@]}" "$_f"); done
   } | "${HASH_CMD[@]}" | awk '{print $1}'
 }
 
@@ -54,42 +65,45 @@ NEW_HASH="$(bundle_hash)"
 # Fast path: unchanged bundle exits silently, never spawns node.
 [ "$NEW_HASH" = "$OLD_HASH" ] && exit 0
 
-# gsd_tools() resolver, adapted from
+# gsd-tools resolver, adapted from
 # davdittrich/ponytail-everywhere's hooks/gsd-tools.sh rather than sourced --
 # the root plugin ships no gsd-tools.sh, and an inline copy keeps this script
 # dependency-free within its own plugin. Deliberately omits that
 # copy's git-toplevel tier: this install is machine-wide, so a stale
 # gsd-core checkout in whatever repo the session opened must not perform it.
-gsd_tools() {
-  if [ -z "${_GSD_TOOLS_ARGS_SET+x}" ]; then
-    _GSD_TOOLS_ARGS_SET=1
-    if command -v gsd-tools >/dev/null 2>&1; then
-      _GSD_TOOLS_ARGS=(gsd-tools)
-    elif [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/gsd-tools.cjs" ]; then
-      _GSD_TOOLS_ARGS=(node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/gsd-tools.cjs")
-    else
-      _GSD_TOOLS_ARGS=()
-    fi
-  fi
-  [ "${#_GSD_TOOLS_ARGS[@]}" -gt 0 ] || return 127
-  "${_GSD_TOOLS_ARGS[@]}" "$@"
-}
-
-# Spec is always the absolute bundle dir -- a relative spec would
-# resolve against the end user's cwd, not the plugin. User scope maps to the CLI's literal --scope global value.
-gsd_tools capability install "$BUNDLE_DIR" --scope global --yes >/dev/null 2>&1
-INSTALL_STATUS=$?
-
-if [ "$INSTALL_STATUS" -eq 0 ]; then
-  printf 'Auto-installed capability: %s (user scope)\n' "$CAP_ID"
-  mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null
-  printf '%s' "$NEW_HASH" > "$STATE_FILE" 2>/dev/null
-elif [ "$INSTALL_STATUS" -eq 127 ]; then
+if command -v gsd-tools >/dev/null 2>&1; then
+  GSD_TOOLS=(gsd-tools)
+elif [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/gsd-tools.cjs" ]; then
+  GSD_TOOLS=(node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/gsd-tools.cjs")
+else
   # Deliberate divergence from this repo's usual silent `|| true`
   # fail-open convention -- this path is unattended, so silence would leave
   # a capability permanently inactive with nobody the wiser. Do not "fix"
   # this back to silent. Do NOT write STATE_FILE, so the next session retries.
   echo "capability-auto-install: gsd-tools not found; $CAP_ID not installed" >&2
+  exit 0
+fi
+
+# Stage the bundle files into a persistent clean directory; gsd-core records
+# the install source, so it must outlive this run. -L because gsd-core refuses
+# symlinks in a bundle.
+BUNDLE_DIR="${GSD_HOME:-$HOME}/.gsd/capability-bundle-$CAP_ID"
+if ! { rm -rf "$BUNDLE_DIR" && mkdir -p "$BUNDLE_DIR" \
+    && (cd "$BUNDLE_SRC" && cp -RL "${BUNDLE_FILES[@]}" "$BUNDLE_DIR"/) \
+    && find "$BUNDLE_DIR" -name __pycache__ -prune -exec rm -rf {} +; } 2>/dev/null; then
+  # Same rationale as above: never install a partial bundle, never record the hash.
+  echo "capability-auto-install: staging failed for $CAP_ID; not installed" >&2
+  exit 0
+fi
+
+# Spec is always the absolute bundle dir -- a relative spec would
+# resolve against the end user's cwd, not the plugin. User scope maps to the CLI's literal --scope global value.
+"${GSD_TOOLS[@]}" capability install "$BUNDLE_DIR" --scope global --yes >/dev/null 2>&1
+INSTALL_STATUS=$?
+
+if [ "$INSTALL_STATUS" -eq 0 ]; then
+  printf 'Auto-installed capability: %s (user scope)\n' "$CAP_ID"
+  printf '%s' "$NEW_HASH" > "$STATE_FILE" 2>/dev/null
 else
   # Same rationale as above: install command ran and failed.
   echo "capability-auto-install: capability install failed for $CAP_ID (exit $INSTALL_STATUS)" >&2
