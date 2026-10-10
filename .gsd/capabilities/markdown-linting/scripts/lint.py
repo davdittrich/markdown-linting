@@ -27,6 +27,10 @@ LINT_TARGETS = (".planning", "README.md", "CLAUDE.md")
 # project has no .gsd/capabilities/markdown-linting/ of its own.
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / ".rumdl.toml"
 
+# uvx fetches whatever it is told to; pin so the fallback tier measures the
+# same ruleset the CI-pinned binary does.
+RUMDL_UVX_SPEC = "rumdl==0.2.79"
+
 # Wall-clock ceiling for any single rumdl invocation. Shared by the count
 # and --fix paths so the two can never drift apart.
 RUMDL_TIMEOUT_SECONDS = 60
@@ -95,7 +99,7 @@ def resolve_rumdl_invocation():
     if shutil.which("rumdl"):
         return ["rumdl"]
     if shutil.which("uvx"):
-        return ["uvx", "rumdl"]
+        return ["uvx", "--from", RUMDL_UVX_SPEC, "rumdl"]
     return None
 
 

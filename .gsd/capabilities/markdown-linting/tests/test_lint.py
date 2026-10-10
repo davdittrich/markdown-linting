@@ -442,7 +442,7 @@ class TestToolResolution(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertGreaterEqual(mock_run.call_count, 1)
             argv = mock_run.call_args_list[0].args[0]
-            self.assertEqual(argv[:2], ["uvx", "rumdl"])
+            self.assertEqual(argv[:4], ["uvx", "--from", "rumdl==0.2.79", "rumdl"])
 
     def test_count_cli_tool_absent_raises_runtime_error(self):
         with tempfile.TemporaryDirectory() as tmp:
