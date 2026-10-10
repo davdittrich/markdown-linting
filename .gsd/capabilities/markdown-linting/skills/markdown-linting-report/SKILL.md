@@ -25,5 +25,5 @@ python3 <lint.py path> verify-post <phase directory>
 Done when one outcome holds:
 
 - Exit 0 and the output is `LINT-REPORT.md regenerated: <n> violation(s)`: print that line verbatim.
-- Exit 0 and the output is a `NOTICE` (rumdl unavailable): print it verbatim. The report is marked unavailable.
+- Exit 0 with any other output (NOTICE or `rumdl failed, lint skipped`): print it verbatim; report marked unavailable.
 - Nonzero exit: print the full output and stop. Do not retry.
