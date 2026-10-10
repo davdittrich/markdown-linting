@@ -81,7 +81,8 @@ bundle files. Where `gsd-tools` is not on `PATH`, run `node ~/.claude/gsd-core/b
 **Migrating to 0.3.0 (bundle at the repo root):** `capability.json`, `config/`, `scripts/`, and
 `skills/` moved from `.gsd/capabilities/markdown-linting/` to the repository root so
 `gsd-tools capability install <git url>` works. Plugin users re-grant automatically at the next
-`SessionStart` (the bundle hash changes with the layout). A project-scope consent recorded for the
+`SessionStart` while the manifest is declarative (no hooks, commands, mcpServers, reviewer); an
+executable manifest needs a manual review (the bundle hash changes with the layout). A project-scope consent recorded for the
 old path goes stale: re-run it from a clean export, never from a checkout (a copied `.git` becomes an
 embedded repository in the project):
 `git -C /path/to/markdown-linting archive HEAD | tar -x -C /tmp/ml && gsd-tools capability install /tmp/ml --scope project --yes`.
