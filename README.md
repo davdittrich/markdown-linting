@@ -29,11 +29,14 @@ Two config keys, both overridable in a project's `.planning/config.json`:
 
 Targets are `.planning/`, root `README.md`, and root `CLAUDE.md`. The two root files are
 **linted if present** -- a project without a root `CLAUDE.md` gets a normal count over what it does
-have, not an error.
+have, not an error. Paths named explicitly (`lint.py count <paths>`, `lint.py fix <paths>`) are not
+filtered, so a typo fails loudly rather than silently linting nothing and reporting `0`.
 
-The enabled rules live in `.gsd/capabilities/markdown-linting/config/.rumdl.toml` (allowlist by
-omission: any rule not listed is off). MD013, MD033, and MD041 are off because agent-generated
-long lines, `<details>` blocks, and frontmatter-led files would make them permanent violations.
+The enabled rules live in `config/.rumdl.toml` (allowlist by omission: any rule not listed is
+off), always passed with an explicit `--config` because rumdl's auto-discovery was measured to
+silently ignore `.markdownlint-cli2.jsonc`-style configs. MD013, MD033, and MD041 are off because
+agent-generated long lines, `<details>` blocks, and frontmatter-led files would make them permanent
+violations.
 
 ## Requirements
 
@@ -63,6 +66,20 @@ claude plugin install markdown-linting@gsd-beads -y
 The marketplace entry stays hosted at `davdittrich/gsd-beads` even though this plugin lives in
 its own repo -- the two repository names are intentionally different.
 
+Without the plugin, install the capability straight from git (it materializes under
+`~/.gsd/capabilities/markdown-linting/`):
+
+```bash
+gsd-tools capability install https://github.com/davdittrich/markdown-linting.git#v0.3.0 --scope global --yes
+```
+
+**Migrating to 0.3.0 (bundle at the repo root):** `capability.json`, `config/`, `scripts/`, and
+`skills/` moved from `.gsd/capabilities/markdown-linting/` to the repository root so
+`gsd capability install <git url>` works. Plugin users re-grant automatically at the next
+`SessionStart` (the bundle hash changes with the layout). A project-scope consent recorded for the
+old path goes stale: re-run
+`gsd-tools capability install /path/to/markdown-linting --scope project --yes`.
+
 ## Uninstall
 
 ```bash
@@ -75,8 +92,9 @@ claude plugin uninstall markdown-linting -y
   identical target set and allowlist-only ruleset, rumdl reported 0 violations where
   `markdownlint-cli2 0.23.2` reported 309 (302 MD022, 7 MD024). Accepted tradeoff: rumdl trades
   some detection depth for a single static binary with no Node dependency.
-- The `SessionStart` hook installs the capability bundle at user scope when the bundle changed
-  since the last successful install, and exits silently otherwise.
+- The `SessionStart` hook stages the bundle files (`capability.json`, `config/`, `scripts/`,
+  `skills/`) into `${GSD_HOME:-$HOME}/.gsd/capability-bundle-markdown-linting` and installs them at
+  user scope when they changed since the last successful install, and exits silently otherwise.
 - Marketplace installation copies the cloned repo into the installer's local plugin cache --
   documented Claude Code behavior this repo does not control.
 

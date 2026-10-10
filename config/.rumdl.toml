@@ -2,6 +2,6 @@
 # Exhaustive allowlist: MD013 (line-length), MD033 (inline-HTML), and MD041
 # (first-line-heading) are off by omission -- do not add a redundant
 # `disable = [...]` line. Rationale for excluding them belongs in the
-# capability README, not here.
+# README, not here.
 [global]
 enable = ["MD001", "MD003", "MD009", "MD012", "MD022", "MD024", "MD040"]
