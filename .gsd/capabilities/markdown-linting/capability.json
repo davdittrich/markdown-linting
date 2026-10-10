@@ -29,7 +29,7 @@
     "markdown-linting.ship_gate": {
       "type": "boolean",
       "default": true,
-      "description": "When true, ship:pre advises (never blocks; blocking is deferred to v2) on violation_count!=0 in LINT-REPORT.md."
+      "description": "When true, ship:pre advises (never blocks) when lint.py count re-measures a nonzero violation count."
     }
   },
   "steps": [
@@ -52,21 +52,6 @@
       "point": "ship:pre",
       "check": {
         "predicate": {
-          "kind": "artifact-frontmatter-equals",
-          "artifact": "LINT-REPORT.md",
-          "field": "violation_count",
-          "equals": 0
-        }
-      },
-      "when": "markdown-linting.ship_gate",
-      "blocking": false,
-      "onError": "skip",
-      "description": "Advisory only: a nonzero violation_count surfaces a warning at ship:pre but never blocks. Deliberately not the sota-numerics onError:halt exception."
-    },
-    {
-      "point": "ship:pre",
-      "check": {
-        "predicate": {
           "kind": "command-exit-zero",
           "timeout": 90,
           "command": "L=\"${CLAUDE_PROJECT_DIR:-.}/.gsd/capabilities/markdown-linting/scripts/lint.py\"; [ -f \"$L\" ] || L=\"${GSD_HOME:-$HOME}/.gsd/capabilities/markdown-linting/scripts/lint.py\"; [ \"$(python3 \"$L\" count)\" = 0 ]"
@@ -75,7 +60,7 @@
       "when": "markdown-linting.ship_gate",
       "blocking": false,
       "onError": "skip",
-      "description": "Advisory re-measure: runs lint.py count at ship:pre so edits made after verify:post cannot pass on a stale violation_count."
+      "description": "Advisory: runs lint.py count at ship:pre; a nonzero count warns but never blocks."
     }
   ]
 }

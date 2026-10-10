@@ -641,8 +641,8 @@ class TestCliPathsResolveAgainstCwd(unittest.TestCase):
 
 
 class TestShipGateRemeasures(unittest.TestCase):
-    """The frontmatter gate only reads verify:post's verdict, so edits made
-    after it pass on a stale 0. The command gate re-measures at ship:pre."""
+    """A frontmatter gate only reads verify:post's verdict, so edits made
+    after it pass on a stale 0. The one ship:pre gate re-measures instead."""
 
     BUNDLE = Path(__file__).resolve().parent.parent
 
@@ -655,6 +655,11 @@ class TestShipGateRemeasures(unittest.TestCase):
         self.assertEqual(len(gates), 1)
         self.assertIs(gates[0]["blocking"], False)
         return gates[0]
+
+    def test_command_gate_is_the_only_gate(self):
+        caps = json.loads((self.BUNDLE / "capability.json").read_text(encoding="utf-8"))
+        kinds = [g["check"]["predicate"]["kind"] for g in caps["gates"]]
+        self.assertEqual(kinds, ["command-exit-zero"])
 
     def test_gate_timeout_covers_rumdl_timeout(self):
         # command-exit-zero defaults to 30s; the gate runs rumdl (up to
