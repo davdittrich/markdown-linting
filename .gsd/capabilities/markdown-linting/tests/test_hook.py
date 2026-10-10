@@ -124,12 +124,17 @@ class TestBundleHash(HookCase):
 
 class TestGitignore(unittest.TestCase):
     def test_tool_caches_are_ignored(self):
-        for cache in (".pytest_cache/x", ".rumdl_cache/x"):
-            with self.subTest(cache=cache):
-                result = subprocess.run(
-                    ["git", "check-ignore", "-q", cache], cwd=REPO
-                )
-                self.assertEqual(result.returncode, 0)
+        # A scratch repo carrying only .gitignore, so the test also runs from
+        # the installed plugin cache, which is not a git work tree.
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copy(REPO / ".gitignore", tmp)
+            subprocess.run(["git", "init", "-q", tmp], check=True)
+            for cache in (".pytest_cache/x", ".rumdl_cache/x"):
+                with self.subTest(cache=cache):
+                    result = subprocess.run(
+                        ["git", "check-ignore", "-q", cache], cwd=tmp
+                    )
+                    self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":
