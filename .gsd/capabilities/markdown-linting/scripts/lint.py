@@ -146,10 +146,6 @@ def count_violations(config_path, targets, rumdl_argv):
     degrades to the `unavailable` sentinel instead of escaping the
     onError:skip dispatch and leaving a stale report behind.
     """
-    if not targets:
-        # rumdl with zero path arguments walks the whole cwd instead of
-        # doing nothing -- an empty target set must never reach it.
-        return 0
     argv = check_argv(rumdl_argv, config_path, targets, "--output-format", "json")
     violations = json.loads(run_rumdl(argv).stdout)
     if not isinstance(violations, list):
@@ -328,11 +324,6 @@ def fix(paths=None):
     operator's markdown in place, and a partially-applied fix reported as
     success is the one outcome worth failing loudly for."""
     config_path, targets, rumdl_argv = resolve_cwd_run_context(paths)
-    if not targets:
-        # Same hazard as count_violations': a bare `rumdl check --fix` with
-        # no path arguments would rewrite every markdown file under cwd.
-        print("no existing targets to fix")
-        return 0
     result = run_rumdl(check_argv(rumdl_argv, config_path, targets, "--fix"))
     print(result.stdout, end="")
     print(result.stderr, end="", file=sys.stderr)
@@ -370,9 +361,7 @@ def main(argv=None):
     if args.command == "count":
         print(count_violations(*resolve_cwd_run_context(args.paths)))
         return 0
-    if args.command == "fix":
-        return fix(args.paths)
-    return 1
+    return fix(args.paths)
 
 
 if __name__ == "__main__":

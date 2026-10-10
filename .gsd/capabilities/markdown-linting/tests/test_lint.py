@@ -694,5 +694,18 @@ class TestCountAndDispatch(unittest.TestCase):
                 self.assertEqual(out.getvalue(), "7\n")
 
 
+class TestTargetsNeverEmpty(unittest.TestCase):
+    """find_project_root requires .planning/, and it is a default target, so
+    the target set handed to rumdl can never be empty -- count_violations and
+    fix need no empty-set guard (a bare rumdl walks cwd, hence the invariant)."""
+
+    def test_defaults_always_include_planning(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".planning").mkdir()
+            found = lint.find_project_root(root)
+            self.assertEqual(lint.resolve_targets(found), [found / ".planning"])
+
+
 if __name__ == "__main__":
     unittest.main()
