@@ -6,8 +6,8 @@ violation-count report.
 stdlib-only (N5: no dependency beyond the `rumdl`/`uvx` binaries and the
 Python 3 standard library). Every rumdl/uvx invocation is an argv list
 passed to `subprocess.run` with shell execution left at its (disabled)
-default -- no rumdl command is ever assembled as a shell string (T-13-01,
-mirrors beads/scripts/sync.py's T-01-01 discipline).
+default -- no rumdl command is ever assembled as a shell string (mirrors
+beads/scripts/sync.py's discipline).
 """
 import argparse
 import json
@@ -17,7 +17,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# D-02: single source of truth for what this capability lints. Every
+# Single source of truth for what this capability lints. Every
 # caller (count, verify-post, fix) resolves its default targets from this
 # constant -- never a hand-typed path list.
 LINT_TARGETS = (".planning", "README.md", "CLAUDE.md")
@@ -35,7 +35,7 @@ RUMDL_UVX_SPEC = "rumdl==0.2.79"
 # and --fix paths so the two can never drift apart.
 RUMDL_TIMEOUT_SECONDS = 60
 
-# MDL-04/B6, mirrors sync.py's NOTICE constant shape -- one line naming the
+# Mirrors sync.py's NOTICE constant shape -- one line naming the
 # tool and both fallback tiers checked.
 NOTICE = "rumdl unavailable (checked PATH and uvx) -- lint skipped, LINT-REPORT.md marked unavailable"
 
@@ -43,7 +43,7 @@ NOTICE = "rumdl unavailable (checked PATH and uvx) -- lint skipped, LINT-REPORT.
 def find_project_root(start):
     """Walk up from `start` to the nearest ancestor containing `.planning/`.
 
-    Guards T-13-02: every path this script reads or writes is confined to
+    Guards path traversal: every path this script reads or writes is confined to
     this resolved root, never derived unchecked from artifact text. Copied
     verbatim from beads/scripts/sync.py -- the two capabilities are
     independent and must not import across capability boundaries.
@@ -59,7 +59,7 @@ def find_project_root(start):
 
 
 def confined(root, *parts):
-    """Join parts onto root and reject any resolved escape (T-13-02)."""
+    """Join parts onto root and reject any resolved escape."""
     candidate = root.joinpath(*parts).resolve()
     try:
         candidate.relative_to(root)
@@ -71,7 +71,7 @@ def confined(root, *parts):
 def resolve_targets(root, paths=None):
     """Confine the target set to `root` and return what rumdl can be handed.
 
-    The D-02 defaults are **lint-if-present**: `README.md` and `CLAUDE.md`
+    The default targets are **lint-if-present**: `README.md` and `CLAUDE.md`
     are both optional in a gsd-core project, and rumdl exits 2 ("Failed to
     find markdown files") when a named path does not exist. Without this
     filter, every verify:post run in a project with no root CLAUDE.md
@@ -91,12 +91,11 @@ def resolve_targets(root, paths=None):
 
 
 def resolve_rumdl_invocation():
-    """D-04's two-tier chain: PATH first, then uvx, else None. Tool-absent
-    fail-open handling (never raising here) is plan 02 scope -- a None
-    return is guarded explicitly by both callers, each on its own terms
+    """Two-tier chain: PATH first, then uvx, else None. A None return is
+    guarded explicitly by both callers, each on its own terms
     rather than this function raising: `resolve_cwd_run_context()` (the
     operator-invoked `count`/`fix` subcommands) raises RuntimeError, while
-    `verify_post()` degrades to the MDL-04 sentinel report."""
+    `verify_post()` degrades to the sentinel report."""
     if shutil.which("rumdl"):
         return ["rumdl"]
     if shutil.which("uvx"):
@@ -136,7 +135,7 @@ def run_rumdl(argv):
 def count_violations(config_path, targets, rumdl_argv):
     """Run `rumdl check --config <config_path> --output-format json
     <targets>` and return the exact integer length of the emitted JSON
-    array -- no text-summary parsing, no rounding (MDL-02 precision).
+    array -- no text-summary parsing, no rounding (exact, not rounded).
 
     Output that is not a JSON array (empty stdout from a rumdl build
     without `--output-format json`, a JSON object, a panic message) raises
@@ -159,7 +158,7 @@ def _write_report(out_path, phase_dir, generated_at, config_path, generated_from
     """Shared frontmatter+body writer for both the happy path and the
     sentinel path -- one place that fully overwrites the report, so the two
     paths cannot drift into different file shapes."""
-    # WR-03 (mirrors pr_status.py's fix): every free-text field is emitted
+    # Mirrors pr_status.py's fix: every free-text field is emitted
     # via json.dumps, whose output is also a valid double-quoted YAML
     # scalar. This escapes both an embedded `"` (which would terminate the
     # scalar early) and an embedded newline (which would otherwise inject
@@ -184,9 +183,7 @@ def _write_report(out_path, phase_dir, generated_at, config_path, generated_from
     lines.append(f"generated_from: {json.dumps(generated_from)}")
     lines.append(f"generated_at: {generated_at}")
     lines.append("---\n")
-    # D-03: count-only, no per-rule/per-file breakdown table. The banner
-    # below has no literal precedent in BEADS.md (B11 is a principle name,
-    # not file content) -- authored fresh here; see 13-RESEARCH.md Pitfall 3.
+    # Count-only, no per-rule/per-file breakdown table.
     body = (
         f"# LINT-REPORT.md: {phase_dir.name}\n\n"
         "> Regenerated every step. Do not hand-edit.\n"
@@ -199,7 +196,7 @@ def verify_post(phase_dir_arg):
     `{phase_dir}/{padded_phase}-LINT-REPORT.md`, never merging a prior
     hand edit.
 
-    MDL-04 fail-open path (rumdl+uvx absent; a live rumdl call raising
+    Fail-open path (rumdl+uvx absent; a live rumdl call raising
     TimeoutExpired/OSError; rumdl exiting with an unexpected crash code
     reported as CalledProcessError; or rumdl emitting output that is not a
     JSON array -- ValueError, which json.JSONDecodeError subclasses): exit
@@ -213,7 +210,7 @@ def verify_post(phase_dir_arg):
     touching BEADS.md when `bd` is unavailable: `bd`'s prior issue data
     stays meaningfully accurate until the next sync, but a lint count where
     the linter never ran is a claim about the tree that was never measured
-    -- MDL-04 success criterion 5 forbids presenting it as current. A
+    -- the gate contract forbids presenting it as current. A
     future editor must not "fix" this back to match beads's leave-it-alone
     behavior. No STATE.md blocker append here either (sync.py's fail-open
     paths do): the sentinel in the report plus the ship-transcript advisory
@@ -301,7 +298,7 @@ def resolve_cwd_run_context(paths=None):
     """Resolve (config_path, targets, rumdl_argv) for the two cwd-rooted
     CLI subcommands (`count`, `fix`). Both are operator-invoked and
     fail LOUDLY when no rumdl is reachable -- unlike verify_post, whose
-    MDL-04 contract is to degrade to a sentinel report instead."""
+    contract is to degrade to a sentinel report instead."""
     project_root = find_project_root(Path.cwd())
     config_path = CONFIG_PATH
     targets = resolve_targets(project_root, paths)
@@ -312,12 +309,11 @@ def resolve_cwd_run_context(paths=None):
 
 
 def fix(paths=None):
-    """Allowlist-safe wrapper for `rumdl check --fix` (Pitfall 6: --fix
-    lives on the check subcommand, not as a bare top-level flag). This
-    machine's shell allowlist rejects a bare top-level `rumdl` command
-    word and interpreter inline-code/heredoc-stdin forms -- routing the
-    fixer through this script file is the invocation form that survives
-    it. Sole caller is plan 03 Task 1.
+    """Allowlist-safe wrapper for `rumdl check --fix` (--fix lives on the
+    check subcommand, not as a bare top-level flag). A shell allowlist may
+    reject a bare top-level `rumdl` command word and interpreter
+    inline-code/heredoc-stdin forms -- routing the fixer through this
+    script file is the invocation form that survives it.
 
     The --fix run goes through run_rumdl, so a config/runtime error or a
     crash raises here instead of being swallowed: this rewrites the
@@ -344,13 +340,13 @@ def main(argv=None):
 
     count_p = sub.add_parser(
         "count",
-        help="Print the integer violation count to stdout (defaults to the D-02 target set)",
+        help="Print the integer violation count to stdout (defaults to the default target set)",
     )
     count_p.add_argument("paths", nargs="*")
 
     fix_p = sub.add_parser(
         "fix",
-        help="Run rumdl check --fix over the D-02 target set (allowlist-safe wrapper)",
+        help="Run rumdl check --fix over the default target set (allowlist-safe wrapper)",
     )
     fix_p.add_argument("paths", nargs="*")
 

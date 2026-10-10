@@ -29,7 +29,7 @@
     "markdown-linting.ship_gate": {
       "type": "boolean",
       "default": true,
-      "description": "When true, ship:pre advises (never blocks -- MDL-05 defers blocking to v2) on violation_count!=0 in LINT-REPORT.md."
+      "description": "When true, ship:pre advises (never blocks; blocking is deferred to v2) on violation_count!=0 in LINT-REPORT.md."
     }
   },
   "steps": [
@@ -61,7 +61,7 @@
       "when": "markdown-linting.ship_gate",
       "blocking": false,
       "onError": "skip",
-      "description": "Advisory only (MDL-03/MDL-05): a nonzero violation_count surfaces a warning at ship:pre but never blocks. Deliberately not the sota-numerics onError:halt exception."
+      "description": "Advisory only: a nonzero violation_count surfaces a warning at ship:pre but never blocks. Deliberately not the sota-numerics onError:halt exception."
     },
     {
       "point": "ship:pre",
