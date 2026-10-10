@@ -44,17 +44,17 @@ def _make_fake_project_root(tmp_path):
     find_project_root). The ruleset is resolved from the bundle itself, so
     no config copy is needed; lets a test point a real rumdl subprocess at
     checked-in fixtures without ever touching the live .planning/ tree (the
-    corpus there changes every session, per 13-RESEARCH.md Pitfall 2)."""
+    corpus there changes every session)."""
     return _write_phase_dir(tmp_path)
 
 
 class TestFailOpen(unittest.TestCase):
-    """MDL-04/Pitfall 5: rumdl+uvx both absent, or a live rumdl call raising
+    """rumdl+uvx both absent, or a live rumdl call raising
     TimeoutExpired/OSError, degrades to exit 0, exactly one NOTICE, and a
     sentinel report that overwrites any prior content -- deliberately
     unlike beads/scripts/sync.py's TestFailOpen, which asserts the
     analogous artifact (BEADS.md) does NOT exist on the fail-open path;
-    here the report file must exist, since Pitfall 5's whole point is that
+    here the report file must exist, since the whole point is that
     the report is never left stale/untouched."""
 
     def test_tool_absent_fail_open(self):
@@ -395,10 +395,10 @@ class TestOutPathConfinement(unittest.TestCase):
 
 
 class TestCuratedRuleset(unittest.TestCase):
-    """MDL-01: the checked-in fixtures pin the curated 7-rule allowlist's
+    """The checked-in fixtures pin the curated 7-rule allowlist's
     actual behavior against real rumdl -- never against the live
-    .planning/ tree, which changes every session (13-RESEARCH.md
-    Pitfall 2). Skipped when neither rumdl nor uvx is on PATH, so the
+    .planning/ tree, which changes every session.
+    Skipped when neither rumdl nor uvx is on PATH, so the
     suite stays green on a machine with no rumdl installed."""
 
     @unittest.skipUnless(_rumdl_available(), "neither rumdl nor uvx is available")
@@ -425,7 +425,7 @@ class TestCuratedRuleset(unittest.TestCase):
 
 
 class TestReportMatchesHandRun(unittest.TestCase):
-    """MDL-02: verify_post()'s written violation_count equals a hand-run
+    """verify_post()'s written violation_count equals a hand-run
     count_violations() call over the identical target set and config."""
 
     @unittest.skipUnless(_rumdl_available(), "neither rumdl nor uvx is available")
@@ -456,10 +456,10 @@ class TestReportMatchesHandRun(unittest.TestCase):
 
 
 class TestToolResolution(unittest.TestCase):
-    """D-04 tier ordering: uvx is used only when rumdl is absent from
+    """Tier ordering: uvx is used only when rumdl is absent from
     PATH, and the actual argv invoked reflects that. Also covers that
     every CLI subcommand guards the both-absent case rather than
-    crashing -- this class is the D-04 tier ordering plus its absent
+    crashing -- this class is the tier ordering plus its absent
     tier, and the test below is the absent tier for `count`."""
 
     def test_uvx_fallback_used_when_rumdl_absent(self):

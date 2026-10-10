@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Vendored auto-install hook (D-05: vendored copy per plugin, not shared at
-# runtime -- see davdittrich/ponytail-everywhere's hooks/capability-auto-install.sh
-# for the byte-identical sibling copy, Phase 10.1 Plan 02).
+# Vendored auto-install hook: a copy per plugin, not shared at runtime. See
+# davdittrich/ponytail-everywhere's hooks/capability-auto-install.sh for the sibling copy.
 #
-# Detects bundle drift via a whole-directory hash and re-grants the
-# capability at global ("user") scope on every SessionStart (D-01..D-03).
+# Detects bundle drift via a whole-directory hash and re-installs the
+# capability at global ("user") scope when the hash changed.
 # Never aborts the session: no `set -e`.
 set -u
 
@@ -19,7 +18,7 @@ PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 BUNDLE_DIR="$PLUGIN_ROOT/.gsd/capabilities/$CAP_ID"
 [ -d "$BUNDLE_DIR" ] || exit 0
 
-# Portable hash tool selection (Assumption A3: macOS ships no sha256sum).
+# Portable hash tool selection (macOS ships no sha256sum).
 if command -v sha256sum >/dev/null 2>&1; then
   HASH_CMD=(sha256sum)
 elif command -v shasum >/dev/null 2>&1; then
@@ -28,9 +27,9 @@ else
   exit 0
 fi
 
-# Whole-bundle-directory hash (D-03): LC_ALL=C-sorted list of every path
+# Whole-bundle-directory hash: LC_ALL=C-sorted list of every path
 # under the bundle (files, directories and symlinks, so an added empty
-# directory is caught -- Assumption A1), each symlink's target, then one
+# directory is caught), each symlink's target, then one
 # content hash per sorted regular file. Per-file hashes keep file
 # boundaries: raw concatenation hashed identically when bytes moved
 # between files.
@@ -42,7 +41,7 @@ bundle_hash() {
   } | "${HASH_CMD[@]}" | awk '{print $1}'
 }
 
-# One sidecar file per capability id (Pitfall 4) so vendored copies in
+# One sidecar file per capability id so vendored copies in
 # different plugins cannot race or stomp each other's cached hash. Never
 # gsd-core's own .gsd-capabilities.json / ~/.gsd/consent.json -- those are
 # gsd-core-owned schemas this script must not write into.
@@ -52,13 +51,13 @@ OLD_HASH=""
 [ -r "$STATE_FILE" ] && OLD_HASH="$(cat "$STATE_FILE" 2>/dev/null)"
 NEW_HASH="$(bundle_hash)"
 
-# D-02 fast path: unchanged bundle exits silently, never spawns node.
+# Fast path: unchanged bundle exits silently, never spawns node.
 [ "$NEW_HASH" = "$OLD_HASH" ] && exit 0
 
 # gsd_tools() resolver, adapted from
 # davdittrich/ponytail-everywhere's hooks/gsd-tools.sh rather than sourced --
 # the root plugin ships no gsd-tools.sh, and an inline copy keeps this script
-# dependency-free within its own plugin (D-05). Deliberately omits that
+# dependency-free within its own plugin. Deliberately omits that
 # copy's git-toplevel tier: this install is machine-wide, so a stale
 # gsd-core checkout in whatever repo the session opened must not perform it.
 gsd_tools() {
@@ -76,9 +75,8 @@ gsd_tools() {
   "${_GSD_TOOLS_ARGS[@]}" "$@"
 }
 
-# Spec is always the absolute bundle dir (Pattern 2) -- a relative spec would
-# resolve against the end user's cwd, not the plugin. Prose "user scope"
-# (D-01) maps to the CLI's literal --scope global value (Pitfall 1).
+# Spec is always the absolute bundle dir -- a relative spec would
+# resolve against the end user's cwd, not the plugin. User scope maps to the CLI's literal --scope global value.
 gsd_tools capability install "$BUNDLE_DIR" --scope global --yes >/dev/null 2>&1
 INSTALL_STATUS=$?
 
@@ -87,13 +85,13 @@ if [ "$INSTALL_STATUS" -eq 0 ]; then
   mkdir -p "$(dirname "$STATE_FILE")" 2>/dev/null
   printf '%s' "$NEW_HASH" > "$STATE_FILE" 2>/dev/null
 elif [ "$INSTALL_STATUS" -eq 127 ]; then
-  # D-04: deliberate divergence from this repo's usual silent `|| true`
+  # Deliberate divergence from this repo's usual silent `|| true`
   # fail-open convention -- this path is unattended, so silence would leave
   # a capability permanently inactive with nobody the wiser. Do not "fix"
   # this back to silent. Do NOT write STATE_FILE, so the next session retries.
   echo "capability-auto-install: gsd-tools not found; $CAP_ID not installed" >&2
 else
-  # D-04, same rationale as above -- install command ran and failed.
+  # Same rationale as above: install command ran and failed.
   echo "capability-auto-install: capability install failed for $CAP_ID (exit $INSTALL_STATUS)" >&2
 fi
 
