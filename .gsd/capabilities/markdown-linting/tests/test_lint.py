@@ -38,19 +38,12 @@ def _write_phase_dir(tmp_path, phase_dir_name="13-markdown-linting-capability-do
 
 
 def _make_fake_project_root(tmp_path):
-    """Build a scratch project root: a .planning/ ancestor (for
-    find_project_root) plus a copy of the shipped .rumdl.toml at the same
-    CONFIG_REL_PARTS location verify_post/count_violations resolve --
-    lets a test point a real rumdl subprocess at checked-in fixtures
-    without ever touching the live .planning/ tree (the corpus there
-    changes every session, per 13-RESEARCH.md Pitfall 2)."""
-    phase_dir = _write_phase_dir(tmp_path)
-    config_dir = tmp_path.joinpath(*lint.CONFIG_REL_PARTS[:-1])
-    config_dir.mkdir(parents=True)
-    (config_dir / lint.CONFIG_REL_PARTS[-1]).write_text(
-        REAL_CONFIG_PATH.read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    return phase_dir
+    """Build a scratch project root with just a .planning/ ancestor (for
+    find_project_root). The ruleset is resolved from the bundle itself, so
+    no config copy is needed; lets a test point a real rumdl subprocess at
+    checked-in fixtures without ever touching the live .planning/ tree (the
+    corpus there changes every session, per 13-RESEARCH.md Pitfall 2)."""
+    return _write_phase_dir(tmp_path)
 
 
 class TestFailOpen(unittest.TestCase):
@@ -416,7 +409,7 @@ class TestReportMatchesHandRun(unittest.TestCase):
                 exit_code = lint.verify_post(str(phase_dir))
                 self.assertEqual(exit_code, 0)
 
-                config_path = tmp_path.joinpath(*lint.CONFIG_REL_PARTS)
+                config_path = lint.CONFIG_PATH
                 rumdl_argv = lint.resolve_rumdl_invocation()
                 handrun_count = lint.count_violations(config_path, [target], rumdl_argv)
 
@@ -522,6 +515,27 @@ class TestEmptyTargetSet(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             report_text = (phase_dir / "13-LINT-REPORT.md").read_text(encoding="utf-8")
             self.assertIn("violation_count: 0\n", report_text)
+
+
+class TestConfigLocation(unittest.TestCase):
+    """The ruleset ships inside the bundle, so a global install (bundle in
+    ~/.gsd, project elsewhere) must resolve it from lint.py's own location,
+    never from the project being linted."""
+
+    def test_verify_post_uses_bundled_config_not_project_copy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            phase_dir = _write_phase_dir(Path(tmp))  # no config under the project
+            completed = subprocess.CompletedProcess(
+                args=["rumdl"], returncode=0, stdout="[]", stderr=""
+            )
+            with mock.patch("shutil.which", return_value="/usr/bin/rumdl"):
+                with mock.patch("subprocess.run", return_value=completed) as mock_run:
+                    with mock.patch("sys.stdout", io.StringIO()):
+                        exit_code = lint.verify_post(str(phase_dir))
+
+            self.assertEqual(exit_code, 0)
+            argv = mock_run.call_args_list[0].args[0]
+            self.assertEqual(Path(argv[argv.index("--config") + 1]), REAL_CONFIG_PATH)
 
 
 if __name__ == "__main__":

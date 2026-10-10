@@ -22,7 +22,10 @@ from pathlib import Path
 # constant -- never a hand-typed path list.
 LINT_TARGETS = (".planning", "README.md", "CLAUDE.md")
 
-CONFIG_REL_PARTS = (".gsd", "capabilities", "markdown-linting", "config", ".rumdl.toml")
+# The ruleset ships inside the bundle, so resolve it from this file, not the
+# project: a global install keeps the bundle in ~/.gsd while the linted
+# project has no .gsd/capabilities/markdown-linting/ of its own.
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / ".rumdl.toml"
 
 # Wall-clock ceiling for any single rumdl invocation. Shared by the count
 # and --fix paths so the two can never drift apart.
@@ -234,7 +237,7 @@ def verify_post(phase_dir_arg):
     project_root = find_project_root(phase_dir)
     padded_phase = phase_dir.name.split("-", 1)[0]
 
-    config_path = confined(project_root, *CONFIG_REL_PARTS)
+    config_path = CONFIG_PATH
     targets = resolve_targets(project_root)
     rumdl_argv = resolve_rumdl_invocation()
     out_path = confined(project_root, phase_dir.relative_to(project_root), f"{padded_phase}-LINT-REPORT.md")
@@ -288,7 +291,7 @@ def resolve_cwd_run_context(paths=None):
     fail LOUDLY when no rumdl is reachable -- unlike verify_post, whose
     MDL-04 contract is to degrade to a sentinel report instead."""
     project_root = find_project_root(Path.cwd())
-    config_path = confined(project_root, *CONFIG_REL_PARTS)
+    config_path = CONFIG_PATH
     targets = resolve_targets(project_root, paths)
     rumdl_argv = resolve_rumdl_invocation()
     if rumdl_argv is None:
