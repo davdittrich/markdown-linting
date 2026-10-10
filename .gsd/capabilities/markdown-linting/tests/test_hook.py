@@ -91,5 +91,36 @@ class TestGsdToolsResolution(HookCase):
         self.assertFalse((self.home / ".gsd").exists())
 
 
+class TestBundleHash(HookCase):
+    def setUp(self):
+        super().setUp()
+        self.stub_on_path()
+
+    def hash_of(self, populate):
+        shutil.rmtree(self.bundle)
+        self.bundle.mkdir(parents=True)
+        shutil.rmtree(self.home, ignore_errors=True)
+        populate(self.bundle)
+        self.run_hook()
+        return self.state_hash()
+
+    def test_moving_content_between_files_changes_hash(self):
+        def one(b):
+            (b / "a").write_text("AB")
+            (b / "b").write_text("")
+
+        def two(b):
+            (b / "a").write_text("A")
+            (b / "b").write_text("B")
+
+        self.assertNotEqual(self.hash_of(one), self.hash_of(two))
+
+    def test_symlink_target_change_changes_hash(self):
+        def to(target):
+            return lambda b: (b / "link").symlink_to(target)
+
+        self.assertNotEqual(self.hash_of(to("x")), self.hash_of(to("y")))
+
+
 if __name__ == "__main__":
     unittest.main()

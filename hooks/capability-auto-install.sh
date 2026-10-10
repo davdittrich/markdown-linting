@@ -29,13 +29,16 @@ else
 fi
 
 # Whole-bundle-directory hash (D-03): LC_ALL=C-sorted list of every path
-# under the bundle (files AND directories, so an added empty directory is
-# caught -- Assumption A1) followed by the concatenated contents of the
-# sorted regular files.
+# under the bundle (files, directories and symlinks, so an added empty
+# directory is caught -- Assumption A1), each symlink's target, then one
+# content hash per sorted regular file. Per-file hashes keep file
+# boundaries: raw concatenation hashed identically when bytes moved
+# between files.
 bundle_hash() {
   {
-    find "$BUNDLE_DIR" \( -type f -o -type d \) | LC_ALL=C sort
-    find "$BUNDLE_DIR" -type f | LC_ALL=C sort | while IFS= read -r _f; do cat "$_f"; done
+    find "$BUNDLE_DIR" \( -type f -o -type d -o -type l \) | LC_ALL=C sort
+    find "$BUNDLE_DIR" -type l | LC_ALL=C sort | while IFS= read -r _l; do readlink "$_l"; done
+    find "$BUNDLE_DIR" -type f | LC_ALL=C sort | while IFS= read -r _f; do "${HASH_CMD[@]}" "$_f"; done
   } | "${HASH_CMD[@]}" | awk '{print $1}'
 }
 
