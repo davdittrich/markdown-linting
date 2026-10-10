@@ -1,6 +1,6 @@
 # markdown-linting
 
-Wraps rumdl over .planning/, README.md, and CLAUDE.md; verify:post writes a gate-readable violation-count report, ship:pre gates advisorily on it.
+Wraps rumdl over .planning/, README.md, and CLAUDE.md; verify:post writes a gate-readable violation-count report, ship:pre re-measures and advises (never blocks).
 
 ## What it does
 
