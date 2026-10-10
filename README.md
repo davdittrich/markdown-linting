@@ -45,7 +45,8 @@ long lines, `<details>` blocks, and frontmatter-led files would make them perman
      `violation_count: unavailable` sentinel. Never a stale count presented as current.
 
   A rumdl that is present but fails (bad ruleset, crash, non-JSON output) writes the same
-  `unavailable` sentinel with an `unavailable_reason`; a config/runtime error also exits `1`. A
+  `unavailable` sentinel with an `unavailable_reason`; a config/runtime error also exits `1`;
+  timeouts, `OSError`, and non-JSON output exit `0` with a one-line cause. A
   broken ruleset is never laundered into a clean `0`.
 
   `rumdl` project: <https://github.com/rvben/rumdl>

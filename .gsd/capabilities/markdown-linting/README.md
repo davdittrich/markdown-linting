@@ -43,7 +43,7 @@ Two config keys, both in `capability.json`'s `config` block and overridable in
 A rumdl that is reachable but fails writes the same `unavailable` sentinel plus an
 `unavailable_reason`, so no failure leaves a stale numeric count for the `ship:pre` gate to read.
 A rumdl config/runtime error also exits `1`; timeouts, `OSError`, and non-JSON output exit `0` with
-the notice.
+a one-line cause.
 
 ## Target set
 
