@@ -52,18 +52,16 @@ NEW_HASH="$(bundle_hash)"
 # D-02 fast path: unchanged bundle exits silently, never spawns node.
 [ "$NEW_HASH" = "$OLD_HASH" ] && exit 0
 
-# gsd_tools() resolver, inlined verbatim from
+# gsd_tools() resolver, adapted from
 # davdittrich/ponytail-everywhere's hooks/gsd-tools.sh rather than sourced --
 # the root plugin ships no gsd-tools.sh, and an inline copy keeps this script
-# dependency-free within its own plugin (D-05).
+# dependency-free within its own plugin (D-05). Deliberately omits that
+# copy's git-toplevel tier: this install is machine-wide, so a stale
+# gsd-core checkout in whatever repo the session opened must not perform it.
 gsd_tools() {
   if [ -z "${_GSD_TOOLS_ARGS_SET+x}" ]; then
     _GSD_TOOLS_ARGS_SET=1
-    local _root
-    _root="$(git rev-parse --show-toplevel 2>/dev/null)"
-    if [ -n "$_root" ] && [ -f "$_root/gsd-core/bin/gsd-tools.cjs" ]; then
-      _GSD_TOOLS_ARGS=(node "$_root/gsd-core/bin/gsd-tools.cjs")
-    elif command -v gsd-tools >/dev/null 2>&1; then
+    if command -v gsd-tools >/dev/null 2>&1; then
       _GSD_TOOLS_ARGS=(gsd-tools)
     elif [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/gsd-tools.cjs" ]; then
       _GSD_TOOLS_ARGS=(node "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/gsd-core/bin/gsd-tools.cjs")
