@@ -3,7 +3,7 @@
 markdown against a curated MD0XX ruleset and write a gate-readable
 violation-count report.
 
-stdlib-only (N5: no dependency beyond the `rumdl`/`uvx` binaries and the
+stdlib-only (no dependency beyond the `rumdl`/`uvx` binaries and the
 Python 3 standard library). Every rumdl/uvx invocation is an argv list
 passed to `subprocess.run` with shell execution left at its (disabled)
 default -- no rumdl command is ever assembled as a shell string (mirrors
@@ -27,8 +27,8 @@ LINT_TARGETS = (".planning", "README.md", "CLAUDE.md")
 # project has no .gsd/capabilities/markdown-linting/ of its own.
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / ".rumdl.toml"
 
-# uvx fetches whatever it is told to; pin so the fallback tier measures the
-# same ruleset the CI-pinned binary does.
+# The uvx fallback tier is pinned to CI's rumdl version; the PATH tier is
+# unpinned (the operator controls that install).
 RUMDL_UVX_SPEC = "rumdl==0.2.79"
 
 # Wall-clock ceiling for any single rumdl invocation. Shared by the count
@@ -192,7 +192,7 @@ def _write_report(out_path, phase_dir, generated_at, config_path, generated_from
 
 
 def verify_post(phase_dir_arg):
-    """B11-style regenerate-every-run: always fully overwrite
+    """Regenerate-every-run: always fully overwrite
     `{phase_dir}/{padded_phase}-LINT-REPORT.md`, never merging a prior
     hand edit.
 

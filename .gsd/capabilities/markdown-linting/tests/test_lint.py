@@ -1,6 +1,6 @@
 """Tests for .gsd/capabilities/markdown-linting/scripts/lint.py.
 
-Stdlib unittest only (N5, review finding R-01): the suite must pass under
+Stdlib unittest only: the suite must pass under
 `python3 -m unittest discover` with no third-party test runner installed.
 lint.py's parent directory is put on sys.path at module import so no
 package __init__.py and no install step is needed -- mirrors
@@ -345,7 +345,7 @@ class TestFix(unittest.TestCase):
 
 
 class TestWriteReportEscaping(unittest.TestCase):
-    """generated_from must be JSON-escaped (mirrors pr_status.py's WR-03
+    """generated_from must be JSON-escaped (mirrors pr_status.py's
     fix) so an embedded `"` cannot terminate the double-quoted YAML scalar
     early. Not reachable via LINT_TARGETS today, but count()/fix() already
     accept arbitrary CLI paths -- this must stay safe regardless."""
@@ -615,6 +615,13 @@ class TestPathResolutionFailure(unittest.TestCase):
             self.assertIn("violation_count: unavailable", text)
             self.assertNotIn("violation_count: 0\n", text)
             self.assertIn("unavailable_reason", text)
+
+
+class TestRumdlPinMatchesCI(unittest.TestCase):
+    def test_ci_pin_equals_uvx_spec(self):
+        ci = Path(__file__).resolve().parents[4] / ".github" / "workflows" / "ci.yml"
+        pinned = re.search(r"rumdl==(\S+)", ci.read_text(encoding="utf-8")).group(1)
+        self.assertEqual(f"rumdl=={pinned}", lint.RUMDL_UVX_SPEC)
 
 
 class TestRumdlPresentInCI(unittest.TestCase):
