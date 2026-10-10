@@ -656,6 +656,13 @@ class TestShipGateRemeasures(unittest.TestCase):
         self.assertIs(gates[0]["blocking"], False)
         return gates[0]
 
+    def test_gate_timeout_covers_rumdl_timeout(self):
+        # command-exit-zero defaults to 30s; the gate runs rumdl (up to
+        # RUMDL_TIMEOUT_SECONDS), so it needs an explicit ceiling at least as long.
+        timeout = self._gate()["check"]["predicate"].get("timeout")
+        self.assertIsInstance(timeout, (int, float))
+        self.assertGreaterEqual(timeout, lint.RUMDL_TIMEOUT_SECONDS)
+
     def _exit_code(self, fixture, env_extra):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
