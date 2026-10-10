@@ -108,7 +108,7 @@ def check_argv(rumdl_argv, config_path, targets, *flags):
     list. Single source of truth for the invocation shape, so the count,
     --fix, and report-provenance paths cannot drift apart (the
     `generated_from` field used to rebuild this list by hand)."""
-    return rumdl_argv + ["check", *flags, "--config", str(config_path)] + [
+    return rumdl_argv + ["check", "--no-cache", *flags, "--config", str(config_path)] + [
         str(t) for t in targets
     ]
 

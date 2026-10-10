@@ -699,6 +699,14 @@ class TestCountAndDispatch(unittest.TestCase):
         with mock.patch("subprocess.run", return_value=completed):
             self.assertEqual(lint.count_violations(Path("c.toml"), [Path("a.md")], ["rumdl"]), 3)
 
+    def test_check_argv_disables_rumdl_cache(self):
+        # rumdl otherwise drops .rumdl_cache into the linted project's cwd.
+        argv = lint.check_argv(["rumdl"], Path("c.toml"), [Path("a.md")], "--fix")
+        self.assertEqual(
+            argv,
+            ["rumdl", "check", "--no-cache", "--fix", "--config", "c.toml", "a.md"],
+        )
+
     def test_main_dispatches_each_subcommand(self):
         with mock.patch.object(lint, "verify_post", return_value=0) as vp:
             self.assertEqual(lint.main(["verify-post", "p"]), 0)
