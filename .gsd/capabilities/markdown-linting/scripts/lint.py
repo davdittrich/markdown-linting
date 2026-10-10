@@ -85,7 +85,8 @@ def resolve_targets(root, paths=None):
     lint nothing and print a reassuring 0.
     """
     if paths:
-        return [confined(root, p) for p in paths]
+        # Relative CLI paths are the operator's cwd-relative paths, not root-relative.
+        return [confined(root, Path.cwd(), p) for p in paths]
     return [t for t in (confined(root, d) for d in LINT_TARGETS) if t.exists()]
 
 

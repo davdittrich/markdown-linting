@@ -494,7 +494,8 @@ class TestOptionalTargets(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             _make_fake_project_root(tmp_path)
-            targets = lint.resolve_targets(tmp_path, ["definitely-absent.md"])
+            with mock.patch.object(lint.Path, "cwd", return_value=tmp_path):
+                targets = lint.resolve_targets(tmp_path, ["definitely-absent.md"])
             self.assertEqual([t.name for t in targets], ["definitely-absent.md"])
 
 
@@ -575,6 +576,18 @@ class TestRumdlPresentInCI(unittest.TestCase):
         if not os.environ.get("CI"):
             self.skipTest("not running under CI")
         self.assertTrue(_rumdl_available(), "CI must install rumdl; real-rumdl tests would skip")
+
+
+class TestCliPathsResolveAgainstCwd(unittest.TestCase):
+    def test_relative_path_from_subdir_names_the_file_in_that_subdir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / ".planning").mkdir()
+            sub = root / "docs"
+            sub.mkdir()
+            with mock.patch.object(lint.Path, "cwd", return_value=sub):
+                targets = lint.resolve_targets(root, ["x.md"])
+            self.assertEqual(targets, [sub / "x.md"])
 
 
 if __name__ == "__main__":
