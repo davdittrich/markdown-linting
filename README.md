@@ -4,17 +4,17 @@ Wraps rumdl over .planning/, README.md, and CLAUDE.md; verify:post writes a gate
 
 ## What it does
 
-One lifecycle step, one gate:
+One lifecycle step and one gate:
 
 - **`verify:post`** runs the bundled `lint.py verify-post <phase_dir>`, which fully overwrites
   `{phase_dir}/{padded_phase}-LINT-REPORT.md` on every invocation (regenerate-every-run, never
   merged with a prior hand edit). The report is **phase-scoped**, not a project-root
-  `.planning/LINT-REPORT.md`: the generic gate evaluator's `artifact-frontmatter-equals` predicate
-  resolves artifacts only inside `phaseDir`, so a root-level file would make the `ship:pre` gate
-  silently never fire.
-- **`ship:pre`** reads `LINT-REPORT.md`'s `violation_count` frontmatter field via
-  `artifact-frontmatter-equals` and is **advisory** (`blocking: false`): a nonzero count prints a
-  warning naming it, but the ship proceeds.
+  `.planning/LINT-REPORT.md`.
+- **`ship:pre`** runs `lint.py count` and is **advisory** (`blocking: false`): a nonzero count
+  prints a warning, but the ship proceeds. It re-measures the tree rather than reading the
+  report, so edits made after `verify:post` cannot pass on a stale count. It locates `lint.py`
+  under `${CLAUDE_PROJECT_DIR}` first, then `${GSD_HOME:-$HOME}`, and `markdown-linting.ship_gate`
+  toggles it.
 
 The skill locates `lint.py` at `${CLAUDE_PROJECT_DIR}/.gsd/capabilities/markdown-linting/scripts/lint.py`,
 then `${GSD_HOME:-$HOME}/.gsd/capabilities/markdown-linting/scripts/lint.py`, and stops with a
