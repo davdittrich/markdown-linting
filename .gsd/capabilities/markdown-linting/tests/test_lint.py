@@ -8,6 +8,7 @@ beads/tests/test_sync.py's own sys.path.insert technique.
 """
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -563,6 +564,17 @@ class TestPathResolutionFailure(unittest.TestCase):
             exit_code, err = self._run(link)
             self.assertEqual(exit_code, 1)
             self.assertFalse(list(Path(outside).iterdir()))
+
+
+class TestRumdlPresentInCI(unittest.TestCase):
+    """The real-rumdl tests above skip when no linter is reachable; on CI
+    that would turn a missing install into a silent green, so there it is
+    a failure instead."""
+
+    def test_rumdl_reachable_when_ci_set(self):
+        if not os.environ.get("CI"):
+            self.skipTest("not running under CI")
+        self.assertTrue(_rumdl_available(), "CI must install rumdl; real-rumdl tests would skip")
 
 
 if __name__ == "__main__":
