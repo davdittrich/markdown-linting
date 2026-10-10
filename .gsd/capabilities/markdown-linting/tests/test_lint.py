@@ -372,18 +372,26 @@ class TestOutPathConfinement(unittest.TestCase):
     """verify_post's out_path goes through confined() like pr_status.py's
     sibling does, so the report can only ever land inside the resolved
     project root. (find_project_root walks UP from phase_dir, so a
-    phase_dir outside its own root is unreachable by construction --
-    confined() is the belt to that braces, and what this asserts is the
-    resulting invariant, not an escape attempt.)"""
+    phase_dir outside its own root is unreachable by construction -- no
+    real input escapes; the test makes confined() reject the report path
+    and asserts verify_post honors the rejection, which fails if the call
+    is removed.)"""
 
-    def test_out_path_confined_to_project_root(self):
+    def test_out_path_goes_through_confined(self):
+        real_confined = lint.confined
+
+        def reject_report(root, *parts):
+            if parts[-1].endswith("-LINT-REPORT.md"):
+                raise ValueError("path escapes project root")
+            return real_confined(root, *parts)
+
         with tempfile.TemporaryDirectory() as tmp:
             phase_dir = _write_phase_dir(Path(tmp))
-            with mock.patch("shutil.which", return_value=None):
-                lint.verify_post(str(phase_dir))
-            out_path = phase_dir / "13-LINT-REPORT.md"
-            self.assertTrue(out_path.exists())
-            self.assertTrue(out_path.resolve().is_relative_to(Path(tmp).resolve()))
+            with mock.patch.object(lint, "confined", side_effect=reject_report):
+                with mock.patch("sys.stderr", io.StringIO()):
+                    exit_code = lint.verify_post(str(phase_dir))
+            self.assertEqual(exit_code, 1)
+            self.assertFalse((phase_dir / "13-LINT-REPORT.md").exists())
 
 
 class TestCuratedRuleset(unittest.TestCase):
@@ -442,6 +450,9 @@ class TestReportMatchesHandRun(unittest.TestCase):
             match = re.search(r"violation_count: (\d+)", report_text)
             self.assertIsNotNone(match, report_text)
             self.assertEqual(int(match.group(1)), handrun_count)
+            # Both sides call the same code; pin the absolute number so a
+            # shared regression cannot pass by agreeing with itself.
+            self.assertEqual(handrun_count, 5)
 
 
 class TestToolResolution(unittest.TestCase):
@@ -656,6 +667,31 @@ class TestShipGateRemeasures(unittest.TestCase):
             shutil.copytree(self.BUNDLE, home / ".gsd" / "capabilities" / "markdown-linting")
             return {"CLAUDE_PROJECT_DIR": str(root), "GSD_HOME": str(home)}
         self.assertEqual(self._exit_code("clean.md", env), 0)
+
+
+class TestCountAndDispatch(unittest.TestCase):
+    def test_count_violations_returns_exact_array_length(self):
+        completed = subprocess.CompletedProcess(
+            args=["rumdl"], returncode=1, stdout=json.dumps([{}, {}, {}]), stderr=""
+        )
+        with mock.patch("subprocess.run", return_value=completed):
+            self.assertEqual(lint.count_violations(Path("c.toml"), [Path("a.md")], ["rumdl"]), 3)
+
+    def test_main_dispatches_each_subcommand(self):
+        with mock.patch.object(lint, "verify_post", return_value=0) as vp:
+            self.assertEqual(lint.main(["verify-post", "p"]), 0)
+            vp.assert_called_once_with("p")
+        with mock.patch.object(lint, "fix", return_value=0) as fx:
+            self.assertEqual(lint.main(["fix", "a.md"]), 0)
+            fx.assert_called_once_with(["a.md"])
+        ctx = (Path("c.toml"), [Path("a.md")], ["rumdl"])
+        with mock.patch.object(lint, "resolve_cwd_run_context", return_value=ctx) as rc:
+            with mock.patch.object(lint, "count_violations", return_value=7) as cv:
+                with mock.patch("sys.stdout", io.StringIO()) as out:
+                    self.assertEqual(lint.main(["count", "a.md"]), 0)
+                rc.assert_called_once_with(["a.md"])
+                cv.assert_called_once_with(*ctx)
+                self.assertEqual(out.getvalue(), "7\n")
 
 
 if __name__ == "__main__":
