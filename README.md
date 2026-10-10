@@ -13,56 +13,40 @@ One lifecycle step, one gate:
   resolves artifacts only inside `phaseDir`, so a root-level file would make the `ship:pre` gate
   silently never fire.
 - **`ship:pre`** reads `LINT-REPORT.md`'s `violation_count` frontmatter field via
-  `artifact-frontmatter-equals` and is **advisory by default** (`blocking: false`): a nonzero
-  count prints a warning naming it, but the ship proceeds.
+  `artifact-frontmatter-equals` and is **advisory** (`blocking: false`): a nonzero count prints a
+  warning naming it, but the ship proceeds.
+
+The skill locates `lint.py` at `${CLAUDE_PROJECT_DIR}/.gsd/capabilities/markdown-linting/scripts/lint.py`,
+then `${GSD_HOME:-$HOME}/.gsd/capabilities/markdown-linting/scripts/lint.py`, and stops with a
+message when neither exists.
 
 Two config keys, both overridable in a project's `.planning/config.json`:
 
 | Key | Default | Effect |
 |-----|---------|--------|
 | `markdown-linting.enabled` | `true` | Master toggle. `false` skips the `verify:post` step entirely (no report is regenerated). |
-| `markdown-linting.ship_gate` | `true` | Whether the advisory `ship:pre` gate is even registered. `false` disables the gate but leaves `verify:post` running. |
+| `markdown-linting.ship_gate` | `true` | Whether the advisory `ship:pre` gate is registered. `false` disables the gate but leaves `verify:post` running. |
 
 Targets are `.planning/`, root `README.md`, and root `CLAUDE.md`. The two root files are
-**linted if present** — a project without a root `CLAUDE.md` gets a normal count over what it does
+**linted if present** -- a project without a root `CLAUDE.md` gets a normal count over what it does
 have, not an error.
 
-Ruleset (allowlist by omission — `config/.rumdl.toml` sets `[global] enable = [...]` with no
-`disable` key, so any rule not listed is off):
-
-**Enabled:**
-
-| Rule | Name | Checks |
-|------|------|--------|
-| MD001 | heading-increment | Heading levels increment by one (no skipping, e.g. `#` -> `###`) |
-| MD003 | heading-style | Consistent heading style (ATX `#`, not Setext underlines) throughout a file |
-| MD009 | no-trailing-spaces | No trailing whitespace at end of line |
-| MD012 | no-multiple-blanks | No more than one consecutive blank line |
-| MD022 | blanks-around-headings | Exactly one blank line above and below every heading |
-| MD024 | no-duplicate-heading | No two headings with identical text |
-| MD040 | fenced-code-language | Every fenced code block declares a language tag |
-
-**Disabled (by omission), with reasons:**
-
-| Rule | Name | Why it's off |
-|------|------|---------------|
-| MD013 | line-length | Fights agent-generated long lines (verified-claim sentences, table rows, cited paths) — enforcing a wrap width would force either constant reflow noise or artificial line breaks mid-claim. |
-| MD033 | no-inline-html | Many gsd-core projects use `<details>` blocks (collapsible sections); banning inline HTML would make that pattern a permanent violation. |
-| MD041 | first-line-heading | gsd-core artifacts are frontmatter-led (`---\nphase: ...\n---`), not heading-led; this rule assumes the opposite convention. |
+The enabled rules live in `.gsd/capabilities/markdown-linting/config/.rumdl.toml` (allowlist by
+omission: any rule not listed is off). MD013, MD033, and MD041 are off because agent-generated
+long lines, `<details>` blocks, and frontmatter-led files would make them permanent violations.
 
 ## Requirements
 
-- **`rumdl`** — first-class prerequisite. Checked in this order by the resolver:
-  1. `rumdl` already on `PATH` — preferred. Install is under the operator's own control (their
-     package manager, their version pin); this capability never installs anything on your behalf.
+- **`rumdl`**, resolved in this order:
+  1. `rumdl` on `PATH` -- preferred; the operator controls install and version, and this
+     capability never installs anything.
   2. `uvx rumdl` (no persistent install).
-  3. Neither available — one visible notice, exit 0, and `LINT-REPORT.md` rewritten with a
+  3. Neither available -- one visible notice, exit 0, and `LINT-REPORT.md` rewritten with a
      `violation_count: unavailable` sentinel. Never a stale count presented as current.
 
-  A rumdl that *is* present but fails (bad ruleset, crash, non-JSON output) is a distinct, louder
-  path: the same `unavailable` sentinel is written, with an `unavailable_reason` naming the
-  failure, but a config/runtime error also exits `1`. A broken ruleset is never laundered into a
-  clean `0`.
+  A rumdl that is present but fails (bad ruleset, crash, non-JSON output) writes the same
+  `unavailable` sentinel with an `unavailable_reason`; a config/runtime error also exits `1`. A
+  broken ruleset is never laundered into a clean `0`.
 
   `rumdl` project: <https://github.com/rvben/rumdl>
 - Python 3 (standard library only)
@@ -76,7 +60,7 @@ claude plugin install markdown-linting@gsd-beads -y
 ```
 
 The marketplace entry stays hosted at `davdittrich/gsd-beads` even though this plugin lives in
-its own repo — the two repository names are intentionally different.
+its own repo -- the two repository names are intentionally different.
 
 ## Uninstall
 
@@ -86,19 +70,13 @@ claude plugin uninstall markdown-linting -y
 
 ## Caveats
 
-- The `ship:pre` gate is **advisory and never blocks** — `capability.json` declares `blocking:
-  false` and `onError: "skip"`, so a nonzero violation count prints a warning and the ship
-  proceeds regardless.
-- **rumdl's `0` is not proof of a clean tree.** rumdl and `markdownlint-cli2` implement the same
-  named rules with different internal heuristics and do not agree on every case. Measured
-  2026-08-18 (commit `866d071`) over an identical target set and allowlist-only ruleset: rumdl
-  reported 0 violations where `markdownlint-cli2 0.23.2` reported 309 (all MD022/MD024,
-  heading-spacing and duplicate-heading cases rumdl's own detector never flags). This is a known,
-  accepted tradeoff, not a defect being glossed over — rumdl trades some detection depth for being
-  a single static binary with no Node dependency class.
-- The `SessionStart` hook re-grants the capability bundle at user scope on every session start and
-  exits silently when the bundle is unchanged.
-- Marketplace installation copies the cloned repo into the installer's local plugin cache —
+- **rumdl's `0` is not proof of a clean tree.** On 2026-08-18 (commit `866d071`), over the
+  identical target set and allowlist-only ruleset, rumdl reported 0 violations where
+  `markdownlint-cli2 0.23.2` reported 309 (302 MD022, 7 MD024). Accepted tradeoff: rumdl trades
+  some detection depth for a single static binary with no Node dependency.
+- The `SessionStart` hook installs the capability bundle at user scope when the bundle changed
+  since the last successful install, and exits silently otherwise.
+- Marketplace installation copies the cloned repo into the installer's local plugin cache --
   documented Claude Code behavior this repo does not control.
 
 ## License
